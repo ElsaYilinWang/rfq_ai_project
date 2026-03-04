@@ -1,0 +1,9 @@
+# Never commit your API key or environment secrets
+.env
+
+# Python virtual environment folder
+venv/
+
+# Byte-compiled files
+__pycache__/
+*.pyc
