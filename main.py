@@ -30,10 +30,8 @@ client = Anthropic()
 # ---------------------------------------------------------------
 # 3. Send a message to Claude
 # ---------------------------------------------------------------
-# The messages.create() call is the core API interaction.
-# - model:      which Claude model to use
-# - max_tokens: maximum length of the response (in tokens ≈ words × 1.3)
-# - messages:   a list of message objects (role + content)
+# This time we ask Claude to extract structured data from an RFQ
+# and return it as JSON — not plain English.
 
 message = client.messages.create(
     model="claude-sonnet-4-20250514",
@@ -41,20 +39,52 @@ message = client.messages.create(
     messages=[
         {
             "role": "user",
-            "content": "Explain what an RFQ is in procurement."
+            
+            "content": """Extract the RFQ information from the text below.
+
+RFQ text:
+Siemens motor 5.5kW quantity 3 delivery 6 weeks
+
+Return a JSON object with these fields:
+- manufacturer
+- product
+- power_rating
+- quantity (as a number)
+- delivery_time
+
+Return valid JSON only.
+Do not include any explanation or extra text.
+Do not wrap the JSON in markdown code fences."""
+
         }
     ]
 )
 
 # ---------------------------------------------------------------
-# 4. Print the response
+# 4. Parse the JSON response into a Python dictionary
 # ---------------------------------------------------------------
-# The API returns a Message object. The actual text lives inside
-# message.content, which is a list of content blocks.
-# For a simple text response, the first block's .text has what we need.
+# json.loads() converts a JSON string into a Python dictionary.
+# We wrap it in try/except because LLM output is not guaranteed
+# to be valid JSON every time.
 
-print("\n--- Claude's Response ---\n")
-print(message.content[0].text)
+import json
+
+raw_response = message.content[0].text
+
+try:
+    rfq_data = json.loads(raw_response)
+
+    print("\n--- Parsed RFQ Data ---\n")
+    print(f"Manufacturer:  {rfq_data['manufacturer']}")
+    print(f"Product:       {rfq_data['product']}")
+    print(f"Power Rating:  {rfq_data['power_rating']}")
+    print(f"Quantity:      {rfq_data['quantity']}")
+    print(f"Delivery Time: {rfq_data['delivery_time']}")
+
+except json.JSONDecodeError:
+    print("\n--- Error: Claude did not return valid JSON ---\n")
+    print("Raw response was:")
+    print(raw_response)
 
 # ---------------------------------------------------------------
 # 5. (Optional) Inspect the full response object
@@ -62,5 +92,5 @@ print(message.content[0].text)
 # Uncomment the lines below to see the complete API response,
 # including metadata like token usage, stop reason, and model info.
 #
-print("\n--- Full Response Object ---\n")
-print(message)
+# print("\n--- Full Response Object ---\n")
+# print(message)
