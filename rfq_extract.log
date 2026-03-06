@@ -1,0 +1,9 @@
+2026-03-06 19:54:21,850 - INFO - Extracting RFQ ！ input length: 43 characters
+2026-03-06 19:54:23,897 - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-03-06 19:54:23,935 - INFO - Extraction successful ！ fields: ['manufacturer', 'product', 'power_rating', 'quantity', 'delivery_time']
+2026-03-06 19:54:23,937 - INFO - Extracting RFQ ！ input length: 47 characters
+2026-03-06 19:54:26,518 - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-03-06 19:54:26,520 - INFO - Extraction successful ！ fields: ['manufacturer', 'product', 'power_rating', 'quantity', 'delivery_time']
+2026-03-06 19:54:26,521 - INFO - Extracting RFQ ！ input length: 20 characters
+2026-03-06 19:54:28,091 - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-03-06 19:54:28,093 - INFO - Extraction successful ！ fields: ['manufacturer', 'product', 'power_rating', 'quantity', 'delivery_time']

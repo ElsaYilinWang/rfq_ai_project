@@ -1,49 +1,45 @@
 """
-RFQ AI Project — First API Call
-================================
-This script sends a simple prompt to the Claude API and prints the response.
-It is the foundation for future procurement automation modules.
+RFQ AI Project — Extraction Module
+====================================
+This module extracts structured RFQ data from raw text using Claude.
 """
 
 import os
+import json
 from anthropic import Anthropic
-
-# ---------------------------------------------------------------
-# 1. Load the API key from the .env file
-# ---------------------------------------------------------------
-# python-dotenv reads key=value pairs from a file called .env
-# and makes them available as environment variables.
-# This keeps your secret API key OUT of your code.
-
 from dotenv import load_dotenv
-load_dotenv()  # reads .env in the same folder
+
+import logging
+
+logging.basicConfig(
+    filename="rfq_extract.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 # ---------------------------------------------------------------
-# 2. Create the API client
+# Setup — runs once when the script starts
 # ---------------------------------------------------------------
-# The Anthropic client automatically looks for an environment
-# variable called ANTHROPIC_API_KEY. Because we loaded .env above,
-# that variable is now set.
 
+load_dotenv()
 client = Anthropic()
 
-# ---------------------------------------------------------------
-# 3. Send a message to Claude
-# ---------------------------------------------------------------
-# This time we ask Claude to extract structured data from an RFQ
-# and return it as JSON — not plain English.
 
-message = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    max_tokens=1024,
-    messages=[
-        {
-            "role": "user",
-            
-            "content": """Extract the RFQ information from the text below.
+# ---------------------------------------------------------------
+# The extraction function
+# ---------------------------------------------------------------
+
+def extract_rfq(text):
+    """
+    Takes raw RFQ text and returns a structured dictionary.
+    """
+
+    logging.info(f"Extracting RFQ — input length: {len(text)} characters")
+
+    prompt = f"""Extract the RFQ information from the text below.
 
 RFQ text:
-Siemens motor 5.5kW quantity 3 delivery 6 weeks
+{text}
 
 Return a JSON object with these fields:
 - manufacturer
@@ -56,41 +52,99 @@ Return valid JSON only.
 Do not include any explanation or extra text.
 Do not wrap the JSON in markdown code fences."""
 
-        }
-    ]
-)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    raw_response = message.content[0].text
+
+    try:
+        rfq_data = json.loads(raw_response)
+        logging.info(f"Extraction successful — fields: {list(rfq_data.keys())}")
+        return rfq_data
+    except json.JSONDecodeError:
+        logging.error(f"JSON parsing failed — raw response: {raw_response}")
+        print("Error: Claude did not return valid JSON")
+        return None
+    
 
 # ---------------------------------------------------------------
-# 4. Parse the JSON response into a Python dictionary
+# Validation
 # ---------------------------------------------------------------
-# json.loads() converts a JSON string into a Python dictionary.
-# We wrap it in try/except because LLM output is not guaranteed
-# to be valid JSON every time.
 
-import json
+REQUIRED_FIELDS = ["manufacturer", "product", "quantity", "delivery_time"]
 
-raw_response = message.content[0].text
+def validate_rfq(rfq_data):
+    """
+    Checks that all required fields exist and are not empty.
+    Returns a list of problems found. Empty list means all good.
+    """
+    problems = []
 
-try:
-    rfq_data = json.loads(raw_response)
+    for field in REQUIRED_FIELDS:
+        if field not in rfq_data:
+            problems.append(f"Missing field: {field}")
+        elif rfq_data[field] is None or rfq_data[field] == "":
+            problems.append(f"Empty field: {field}")
 
-    print("\n--- Parsed RFQ Data ---\n")
-    print(f"Manufacturer:  {rfq_data['manufacturer']}")
-    print(f"Product:       {rfq_data['product']}")
-    print(f"Power Rating:  {rfq_data['power_rating']}")
-    print(f"Quantity:      {rfq_data['quantity']}")
-    print(f"Delivery Time: {rfq_data['delivery_time']}")
-
-except json.JSONDecodeError:
-    print("\n--- Error: Claude did not return valid JSON ---\n")
-    print("Raw response was:")
-    print(raw_response)
+    return problems
 
 # ---------------------------------------------------------------
-# 5. (Optional) Inspect the full response object
+# Test the function
 # ---------------------------------------------------------------
-# Uncomment the lines below to see the complete API response,
-# including metadata like token usage, stop reason, and model info.
-#
-# print("\n--- Full Response Object ---\n")
-# print(message)
+
+if __name__ == "__main__":
+    test_text_2 = "ABB drive 22kW quantity 10 delivery 4 weeks"
+
+    result_2 = extract_rfq(test_text_2)
+
+    if result_2:
+        print("\n--- Second RFQ ---\n")
+        print(f"Manufacturer:  {result_2['manufacturer']}")
+        print(f"Product:       {result_2['product']}")
+        print(f"Power Rating:  {result_2['power_rating']}")
+        print(f"Quantity:      {result_2['quantity']}")
+        print(f"Delivery Time: {result_2['delivery_time']}")
+
+    test_text = "Siemens motor 5.5kW quantity 3 delivery 6 weeks"
+
+    result = extract_rfq(test_text)
+
+    if result:
+        problems = validate_rfq(result)
+
+        if problems:
+            print("\n--- Validation Issues ---\n")
+            for p in problems:
+                print(f"  WARNING: {p}")
+        else:
+            print("\n--- RFQ Valid ---\n")
+
+        print(f"Manufacturer:  {result['manufacturer']}")
+        print(f"Product:       {result['product']}")
+        print(f"Quantity:      {result['quantity']}")
+        print(f"Delivery Time: {result['delivery_time']}")
+    
+    # Third test — vague input to test validation
+    test_text_3 = "need some parts soon"
+
+    result_3 = extract_rfq(test_text_3)
+
+    if result_3:
+        problems_3 = validate_rfq(result_3)
+
+        if problems_3:
+            print("\n--- Validation Issues ---\n")
+            for p in problems_3:
+                print(f"  WARNING: {p}")
+        else:
+            print("\n--- RFQ Valid ---\n")
+
+        print(result_3)
