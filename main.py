@@ -81,75 +81,79 @@ Rules:
     
 
 # ---------------------------------------------------------------
-# Validation
+# Schema and Validation
 # ---------------------------------------------------------------
 
-REQUIRED_FIELDS = ["manufacturer", "product", "quantity", "delivery_time"]
+RFQ_SCHEMA = {
+    "manufacturer": {"type": str, "required": True},
+    "product":      {"type": str, "required": True},
+    "quantity":     {"type": int, "required": True},
+    "delivery_time": {"type": str, "required": False},
+}
 
 def validate_rfq(rfq_data):
     """
-    Checks that all required fields exist and are not empty.
-    Returns a list of problems found. Empty list means all good.
+    Validates extracted RFQ data against the schema.
+    Checks: required fields present, correct data types.
+    Returns a list of problems. Empty list means valid.
     """
     problems = []
 
-    for field in REQUIRED_FIELDS:
+    for field, rules in RFQ_SCHEMA.items():
+
+        # Check if field exists
         if field not in rfq_data:
-            problems.append(f"Missing field: {field}")
-        elif rfq_data[field] is None or rfq_data[field] == "":
-            problems.append(f"Empty field: {field}")
+            if rules["required"]:
+                problems.append(f"Missing required field: {field}")
+            continue
+
+        value = rfq_data[field]
+
+        # None is acceptable for optional fields
+        if value is None:
+            if rules["required"]:
+                problems.append(f"Required field is null: {field}")
+            continue
+
+        # Check data type
+        if not isinstance(value, rules["type"]):
+            problems.append(
+                f"Wrong type for {field}: expected {rules['type'].__name__}, "
+                f"got {type(value).__name__} ({value})"
+            )
 
     return problems
-
 # ---------------------------------------------------------------
 # Test the function
 # ---------------------------------------------------------------
 
 if __name__ == "__main__":
-    test_text_2 = "ABB drive 22kW quantity 10 delivery 4 weeks"
 
-    result_2 = extract_rfq(test_text_2)
+    test_cases = [
+        "Siemens motor 5.5kW quantity 3 delivery 6 weeks",
+        "ABB drive 22kW quantity 10 delivery 4 weeks",
+        "Need pricing for 10x Schneider contactor LC1D25",
+        "need some parts soon",
+    ]
 
-    if result_2:
-        print("\n--- Second RFQ ---\n")
-        print(f"Manufacturer:  {result_2['manufacturer']}")
-        print(f"Product:       {result_2['product']}")
-        print(f"Power Rating:  {result_2['power_rating']}")
-        print(f"Quantity:      {result_2['quantity']}")
-        print(f"Delivery Time: {result_2['delivery_time']}")
+    for i, text in enumerate(test_cases):
+        print(f"\n{'=' * 50}")
+        print(f"Test {i + 1}: {text}")
+        print('=' * 50)
 
-    test_text = "Siemens motor 5.5kW quantity 3 delivery 6 weeks"
+        result = extract_rfq(text)
 
-    result = extract_rfq(test_text)
+        if result is None:
+            print("EXTRACTION FAILED: No JSON returned")
+            continue
 
-    if result:
         problems = validate_rfq(result)
 
         if problems:
-            print("\n--- Validation Issues ---\n")
+            print("VALIDATION ISSUES:")
             for p in problems:
                 print(f"  WARNING: {p}")
         else:
-            print("\n--- RFQ Valid ---\n")
+            print("VALID")
 
-        print(f"Manufacturer:  {result['manufacturer']}")
-        print(f"Product:       {result['product']}")
-        print(f"Quantity:      {result['quantity']}")
-        print(f"Delivery Time: {result['delivery_time']}")
-    
-    # Third test — vague input to test validation
-    test_text_3 = "need some parts soon"
-
-    result_3 = extract_rfq(test_text_3)
-
-    if result_3:
-        problems_3 = validate_rfq(result_3)
-
-        if problems_3:
-            print("\n--- Validation Issues ---\n")
-            for p in problems_3:
-                print(f"  WARNING: {p}")
-        else:
-            print("\n--- RFQ Valid ---\n")
-
-        print(result_3)
+        print(f"Result: {result}")
