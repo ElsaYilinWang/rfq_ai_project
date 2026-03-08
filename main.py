@@ -36,21 +36,26 @@ def extract_rfq(text):
 
     logging.info(f"Extracting RFQ — input length: {len(text)} characters")
 
-    prompt = f"""Extract the RFQ information from the text below.
+    prompt = f"""You are a procurement data extraction assistant.
+
+Extract RFQ information from the text below.
 
 RFQ text:
 {text}
 
-Return a JSON object with these fields:
-- manufacturer
-- product
-- power_rating
-- quantity (as a number)
-- delivery_time
+Return a JSON object with exactly these fields:
+- manufacturer: the brand or manufacturer name
+- product: the product type followed by model number (e.g. "motor 5.5kW", "contactor LC1D25")
+- quantity: the number of units as an integer
+- delivery_time: the delivery or lead time as a specific timeframe (e.g. "6 weeks")
 
-Return valid JSON only.
-Do not include any explanation or extra text.
-Do not wrap the JSON in markdown code fences."""
+Rules:
+- Return valid JSON only.
+- Do not include any explanation or extra text.
+- Do not wrap the JSON in markdown code fences.
+- If a field is not mentioned in the text, use null.
+- For product, always put the product type before the model number.
+- Words like "ASAP" or "urgent" are not specific delivery times. Use null instead."""
 
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
