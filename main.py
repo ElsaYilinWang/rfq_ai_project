@@ -50,13 +50,15 @@ Return a JSON object with exactly these fields:
 - delivery_time: the delivery or lead time as a specific timeframe (e.g. "6 weeks")
 
 Rules:
+Rules:
 - Return valid JSON only.
 - Do not include any explanation or extra text.
 - Do not wrap the JSON in markdown code fences.
 - If a field is not mentioned in the text, use null.
 - For product, always put the product type before the model number.
+- If only a part number is given with no product description, use "part" as the product type followed by the part number exactly as written.
 - Words like "ASAP" or "urgent" are not specific delivery times. Use null instead."""
-
+    
     message = client.messages.create(
         model="claude-sonnet-4-20250514",
         max_tokens=1024,

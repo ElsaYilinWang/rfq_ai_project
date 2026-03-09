@@ -64,9 +64,44 @@ test_rfqs = [
         "input": "Looking for Siemens S7-1200 PLC starter kit, quantity seven, 3-4 weeks delivery",
         "expected": {
             "manufacturer": "Siemens",
-            "product": "PLC starter kit S7-1200",
+            "product": "PLC S7-1200 starter kit",
             "quantity": 7,
             "delivery_time": "3-4 weeks"
         }
     },
-]
+    {
+        "input": "Bearing 6205-2RS quantity 15 delivery 2 weeks",
+        "expected": {
+            "manufacturer": None,
+            "product": "bearing 6205-2RS",
+            "quantity": 15,
+            "delivery_time": "2 weeks"
+        }
+    },
+    {
+        "input": """Hi,
+
+Please quote below item urgently.
+
+Part number: SKF-6205
+Qty: 20
+Lead time required: ASAP
+
+Thanks""",
+        "expected": {
+            "manufacturer": "SKF",
+            "product": "SKF-6205",
+            "quantity": 20,
+            "delivery_time": None
+        }
+    },
+    {
+        "input": "Item: Pump Seal, MFR: John Crane, Model: 5610, Qty: 5",
+        "expected": {
+            "manufacturer": "John Crane",
+            "product": "pump seal 5610",
+            "quantity": 5,
+            "delivery_time": None
+        }
+    },
+] 
