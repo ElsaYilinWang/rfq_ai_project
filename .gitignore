@@ -1,9 +1,33 @@
-# Never commit your API key or environment secrets
+# Environment variables - NEVER commit these
 .env
+.env.*
 
-# Python virtual environment folder
-venv/
-
-# Byte-compiled files
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Output files (JSON parsed results)
+output/
+
+# Mock data containing real RFQ files
+mock_data/*.xlsm
+mock_data/*.xlsx
