@@ -128,12 +128,19 @@ class RFQParser:
         date = str(self.sheet.cell(row=1, column=4).value or "").strip()
 
         # Extract internal reference and confirm RFQ number from filename
-        # Filename format: 3434_0_6000186510.xlsm
-        filename = self.file_path.stem  # e.g. 3434_0_6000186510
-        parts = filename.split("_")
+        # Filename format: 3435.0 6000186511.xlsm
+        # or:              3424.0 6000186454 Emerson.xlsm
+        filename = self.file_path.stem  # e.g. 3435.0 6000186511
 
-        internal_reference = parts[0] if parts else ""
-        filename_rfq_number = parts[-1] if parts else ""
+        if ".0 " in filename:
+            parts = filename.split(".0 ", 1)
+            internal_reference = parts[0].strip()
+            filename_rfq_number = parts[1].strip()
+        else:
+            # Fallback for underscore format (test files)
+            parts = filename.split("_")
+            internal_reference = parts[0] if parts else ""
+            filename_rfq_number = parts[-1] if parts else ""
 
         # Hard check — filename RFQ number must match cell A1
         if filename_rfq_number != rfq_number:
