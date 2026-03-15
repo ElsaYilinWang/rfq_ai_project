@@ -17,6 +17,7 @@ from openpyxl.comments import Comment
 from .schemas import (
     RFQMetadata,
     SourcingIdentifier,
+    ExtractedReference,
     LineItem,
     ParsedRFQ
 )
@@ -211,7 +212,7 @@ class RFQParser:
 
         # Parse PN/MODEL/MFR
         pn_model_mfr = str(row[5] or "").strip()
-        sourcing_identifiers = self._parse_pn_model_mfr(pn_model_mfr)
+        sourcing_identifiers, extracted_refs, pn_flags = self._parse_pn_model_mfr(pn_model_mfr)
 
         # Parse lead time
         lead_time_str = str(row[6] or "").strip()
@@ -225,54 +226,76 @@ class RFQParser:
             lead_time_date=lead_time_date,
             lead_time_weeks=lead_time_weeks,
             sourcing_identifiers=sourcing_identifiers,
-            flags=[],
-            extracted_references=[]
+            flags=pn_flags,
+            extracted_references=extracted_refs
         )
 
     # ---------------------------------------------------------------
     # Step 5 — Parse PN/MODEL/MFR
     # ---------------------------------------------------------------
 
-    def _parse_pn_model_mfr(self, pn_model_mfr: str) -> list:
+    def _parse_pn_model_mfr(self, pn_model_mfr: str) -> tuple:
         """
-        Parses PN/MODEL/MFR field into a list of SourcingIdentifier objects.
-        Tries ' - ' as separator first, then ' / '.
-        If both fail, stores entire string as part_number.
+        Parses PN/MODEL/MFR field into a list of SourcingIdentifier objects
+        and a list of unstructured entries for manual review.
+
+        Returns: (sourcing_identifiers, extracted_references, flags)
+
+        Three patterns handled:
+        Pattern 1: 'PART_NUMBER - MANUFACTURER' → clean split
+        Pattern 2: 'PART_NUMBER / MANUFACTURER' → clean split
+        Pattern 3: no separator → store in extracted_references, flag for review
         """
         if not pn_model_mfr or pn_model_mfr.strip() == "":
-            return []
+            return [], [], ["missing_sourcing_identifier"]
 
         identifiers = []
+        extracted = []
+        flags = []
+        unstructured_count = 0
+
         entries = pn_model_mfr.split("\n")
 
         for entry in entries:
             if not entry.strip():
                 continue
 
-            # Try ' - ' first using regex to handle edge cases
+            # Pattern 1 — try ' - ' separator
             parts = re.split(r'\s+-\s+', entry, maxsplit=1)
             if len(parts) == 2:
                 part_number = parts[0].strip() or None
                 manufacturer = parts[1].strip() or None
+                identifiers.append(SourcingIdentifier(
+                    part_number=part_number,
+                    manufacturer=manufacturer
+                ))
+                continue
 
-            # Try ' / ' second
-            else:
-                parts = re.split(r'\s+/\s+', entry, maxsplit=1)
-                if len(parts) == 2:
-                    part_number = parts[0].strip() or None
-                    manufacturer = parts[1].strip() or None
+            # Pattern 2 — try ' / ' separator
+            parts = re.split(r'\s+/\s+', entry, maxsplit=1)
+            if len(parts) == 2:
+                part_number = parts[0].strip() or None
+                manufacturer = parts[1].strip() or None
+                identifiers.append(SourcingIdentifier(
+                    part_number=part_number,
+                    manufacturer=manufacturer
+                ))
+                continue
 
-                # Both failed — store entire string as part_number
-                else:
-                    part_number = entry.strip() or None
-                    manufacturer = None
+            # Pattern 3 — no separator found
+            # Store first 5 unstructured entries for manual review
+            if unstructured_count < 5:
+                extracted.append(ExtractedReference(
+                    type="UNSTRUCTURED_IDENTIFIER",
+                    value=entry.strip()
+                ))
+                unstructured_count += 1
 
-            identifiers.append(SourcingIdentifier(
-                part_number=part_number,
-                manufacturer=manufacturer
-            ))
+        # Flag for manual review if any unstructured entries found
+        if extracted:
+            flags.append("needs_manual_review")
 
-        return identifiers
+        return identifiers, extracted, flags
 
     # ---------------------------------------------------------------
     # Step 6 — Parse lead time

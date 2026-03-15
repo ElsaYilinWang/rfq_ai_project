@@ -33,21 +33,27 @@ def validate_hard_errors(rfq_number: str, items_count: int) -> None:
 def validate_sourcing_identifiers(item: LineItem) -> List[str]:
     """
     Validates sourcing identifiers for a single line item.
-    Returns a list of flags. Empty list means no issues found.
+    Appends to existing flags rather than replacing them.
+    Returns a combined list of flags.
     """
-    flags = []
+    flags = list(item.flags)  # preserve flags already set by parser
 
-    # Check if PN/MODEL/MFR was entirely blank
-    if not item.sourcing_identifiers:
-        flags.append("missing_sourcing_identifier")
+    # Skip further validation if already flagged as missing entirely
+    if "missing_sourcing_identifier" in flags:
+        return flags
+
+    # Skip further validation if unstructured — needs manual review anyway
+    if "needs_manual_review" in flags:
         return flags
 
     # Check each sourcing identifier entry
     for identifier in item.sourcing_identifiers:
         if not identifier.part_number or identifier.part_number.strip() == "":
-            flags.append("missing_part_number")
+            if "missing_part_number" not in flags:
+                flags.append("missing_part_number")
         if not identifier.manufacturer or identifier.manufacturer.strip() == "":
-            flags.append("missing_manufacturer")
+            if "missing_manufacturer" not in flags:
+                flags.append("missing_manufacturer")
 
     return flags
 

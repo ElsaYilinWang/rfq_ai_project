@@ -54,7 +54,7 @@ def run_single_test(test_case: dict, case_number: int) -> bool:
     parser = RFQParser.__new__(RFQParser)
 
     # Test PN/MODEL/MFR parsing
-    sourcing_identifiers = parser._parse_pn_model_mfr(
+    sourcing_identifiers, extracted_refs, pn_flags = parser._parse_pn_model_mfr(
         input_data["pn_model_mfr"]
     )
 
@@ -72,8 +72,8 @@ def run_single_test(test_case: dict, case_number: int) -> bool:
         lead_time_date=lead_time_date,
         lead_time_weeks=lead_time_weeks,
         sourcing_identifiers=sourcing_identifiers,
-        flags=[],
-        extracted_references=[]
+        flags=pn_flags,
+        extracted_references=extracted_refs
     )
 
     # Run validation
