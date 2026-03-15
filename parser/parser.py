@@ -368,6 +368,7 @@ class RFQParser:
                 continue
 
             # Build comment text
+            # Build comment text
             comment_lines = []
 
             if item.flags:
@@ -378,7 +379,9 @@ class RFQParser:
             if item.extracted_references:
                 comment_lines.append("REFERENCES:")
                 for ref in item.extracted_references:
-                    comment_lines.append(f"  - {ref.type}: {ref.value}")
+                    comment_lines.append(
+                        f"  - {ref.type}: {ref.value}"
+                    )
 
             comment_text = "\n".join(comment_lines)
 
