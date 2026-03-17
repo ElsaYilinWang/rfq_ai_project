@@ -32,7 +32,5 @@ output/
 mock_data/*.xlsm
 mock_data/*.xlsx
 
-echo "" >> .gitignore
-echo "# Log files" >> .gitignore
-echo "logs/" >> .gitignore
-mkdir logs
+# Log files
+logs/
