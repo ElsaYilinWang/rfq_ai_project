@@ -395,3 +395,15 @@ class RFQParser:
         # Save the workbook back to original location
         self.workbook.save(self.file_path)
         print(f"Excel comments written to: {self.file_path}")
+
+        # Second pass — write new comments where needed
+        for row_idx, item in enumerate(parsed_rfq.items, start=3):
+            
+            # DEBUG — remove after fixing
+            if item.material_number == '1000090583':
+                print(f"DEBUG flags: {item.flags}")
+                print(f"DEBUG extracted_references: {item.extracted_references}")
+
+            # Only add comment if there are flags or extracted references
+            if not item.flags and not item.extracted_references:
+                continue
