@@ -360,14 +360,19 @@ class RFQParser:
         in the original Excel file.
         Each comment contains all flags and extracted references
         for that item.
+        Clears any existing comments before writing new ones.
         """
+        # First pass — clear ALL existing comments on Material column
+        for row_idx in range(3, self.sheet.max_row + 1):
+            self.sheet.cell(row=row_idx, column=2).comment = None
+
+        # Second pass — write new comments where needed
         for row_idx, item in enumerate(parsed_rfq.items, start=3):
 
             # Only add comment if there are flags or extracted references
             if not item.flags and not item.extracted_references:
                 continue
 
-            # Build comment text
             # Build comment text
             comment_lines = []
 
@@ -379,9 +384,7 @@ class RFQParser:
             if item.extracted_references:
                 comment_lines.append("REFERENCES:")
                 for ref in item.extracted_references:
-                    comment_lines.append(
-                        f"  - {ref.type}: {ref.value}"
-                    )
+                    comment_lines.append(f"  - {ref.type}: {ref.value}")
 
             comment_text = "\n".join(comment_lines)
 
