@@ -390,22 +390,10 @@ class RFQParser:
 
             # Add comment to Material cell (column B = column 2)
             comment = Comment(comment_text, "RFQ Parser")
-            comment.width = 300
+            comment.width = 400
             comment.height = 200
             self.sheet.cell(row=row_idx, column=2).comment = comment
 
         # Save the workbook back to original location
         self.workbook.save(self.file_path)
         print(f"Excel comments written to: {self.file_path}")
-
-        # Second pass — write new comments where needed
-        for row_idx, item in enumerate(parsed_rfq.items, start=3):
-            
-            # DEBUG — remove after fixing
-            if item.material_number == '1000090583':
-                print(f"DEBUG flags: {item.flags}")
-                print(f"DEBUG extracted_references: {item.extracted_references}")
-
-            # Only add comment if there are flags or extracted references
-            if not item.flags and not item.extracted_references:
-                continue
