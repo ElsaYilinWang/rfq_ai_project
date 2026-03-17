@@ -26,6 +26,7 @@ from .validators import (
     validate_sourcing_identifiers,
     generate_overall_flags
 )
+from .logger import logger
 
 
 class RFQParser:
@@ -44,8 +45,15 @@ class RFQParser:
         Main entry point. Orchestrates the full parsing pipeline.
         Returns a ParsedRFQ object and writes JSON and Excel outputs.
         """
+        import time
+        start_time = time.time()
+
+        logger.info("=" * 50)
+        logger.info(f"Parser started — file: {self.file_path.name}")
+
         # Step 1 — Validate file
         self._validate_file()
+        logger.info("File validated successfully")
 
         # Step 2 — Load workbook
         self.workbook = openpyxl.load_workbook(
@@ -59,12 +67,17 @@ class RFQParser:
                 f"{self.file_path.name}. "
                 f"Available sheets: {self.workbook.sheetnames}"
             )
+        logger.info("Workbook loaded — SPREADSHEET sheet found")
 
         # Step 3 — Extract metadata
         metadata = self._extract_metadata()
+        logger.info(f"Metadata extracted — RFQ: {metadata.rfq_number} | "
+                    f"Client: {metadata.client_contact} | "
+                    f"Date: {metadata.date}")
 
         # Step 4 — Parse line items
         items = self._parse_line_items()
+        logger.info(f"Line items parsed — count: {len(items)}")
 
         # Step 5 — Validate hard errors
         validate_hard_errors(metadata.rfq_number, len(items))
@@ -73,8 +86,20 @@ class RFQParser:
         for item in items:
             item.flags = validate_sourcing_identifiers(item)
 
+        flagged_items = [i for i in items if i.flags]
+        logger.info(f"Validation complete — "
+                    f"flagged: {len(flagged_items)}/{len(items)}")
+
+        if flagged_items:
+            for item in flagged_items:
+                logger.warning(f"Item flagged — "
+                               f"material: {item.material_number} | "
+                               f"flags: {item.flags}")
+
         # Step 7 — Generate overall flags
         overall_flags = generate_overall_flags(items)
+        if overall_flags:
+            logger.warning(f"Overall flags: {overall_flags}")
 
         # Step 8 — Build ParsedRFQ object
         parsed_rfq = ParsedRFQ(
@@ -85,7 +110,16 @@ class RFQParser:
 
         # Step 9 — Write outputs
         self._write_json_output(parsed_rfq, output_json_folder)
+        logger.info(f"JSON output written — "
+                    f"file: parsed_{metadata.rfq_number}.json")
+
         self._write_excel_comments(parsed_rfq)
+        logger.info(f"Excel comments written — "
+                    f"file: {self.file_path.name}")
+
+        duration = round(time.time() - start_time, 2)
+        logger.info(f"Parser complete — duration: {duration}s")
+        logger.info("=" * 50)
 
         return parsed_rfq
 
