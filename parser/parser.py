@@ -390,6 +390,8 @@ class RFQParser:
 
             # Add comment to Material cell (column B = column 2)
             comment = Comment(comment_text, "RFQ Parser")
+            comment.width = 300
+            comment.height = 200
             self.sheet.cell(row=row_idx, column=2).comment = comment
 
         # Save the workbook back to original location
