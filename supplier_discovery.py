@@ -35,7 +35,9 @@ class SupplierDiscoveryDB:
                 supplier_id INTEGER NOT NULL,
                 material_number TEXT NOT NULL,
                 mfr_name TEXT NOT NULL,
-                priority TEXT NOT NULL CHECK(priority IN ('P1', 'P2', 'P3')),
+                priority TEXT CHECK(priority IN ('P1', 'P2', 'P3')),
+                status TEXT NOT NULL DEFAULT 'normal' 
+                    CHECK(status IN ('normal', 'mfr_direct', 'discontinued', 'skip')),
                 previous_folder_number TEXT,
                 reason TEXT,
                 date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -62,16 +64,20 @@ class SupplierDiscoveryDB:
         
         return supplier_id
     
-    def insert_interaction(self, supplier_id, material_number, mfr_name, priority, previous_folder_number=None, reason=None):
+    def insert_interaction(self, supplier_id, material_number, mfr_name, 
+                       priority=None, status='normal', 
+                       previous_folder_number=None, reason=None):
         """Record interaction with supplier for specific material"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        
+    
         cursor.execute('''
             INSERT INTO interaction 
-            (supplier_id, material_number, mfr_name, priority, previous_folder_number, reason)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (supplier_id, material_number, mfr_name, priority, previous_folder_number, reason))
+            (supplier_id, material_number, mfr_name, priority, status, 
+            previous_folder_number, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (supplier_id, material_number, mfr_name, priority, status,
+            previous_folder_number, reason))
         
         conn.commit()
         conn.close()
@@ -84,7 +90,7 @@ class SupplierDiscoveryDB:
         
         cursor.execute('''
             SELECT s.supplier_id, s.supplier_name, s.supplier_email, s.mfr_name,
-                   i.priority, i.reason, i.date_created, i.previous_folder_number
+                i.priority, i.status, i.reason, i.date_created, i.previous_folder_number
             FROM supplier s
             JOIN interaction i ON s.supplier_id = i.supplier_id
             WHERE i.material_number = ?
@@ -104,7 +110,7 @@ class SupplierDiscoveryDB:
         
         cursor.execute('''
             SELECT s.supplier_id, s.supplier_name, s.supplier_email, s.mfr_name,
-                   i.priority, i.reason, i.date_created, i.previous_folder_number
+                    i.priority, i.status, i.reason, i.date_created, i.previous_folder_number
             FROM supplier s
             JOIN interaction i ON s.supplier_id = i.supplier_id
             WHERE s.mfr_name = ?
@@ -117,27 +123,31 @@ class SupplierDiscoveryDB:
         return results
     
     def display_results_ranked(self, results):
-        """Format and rank results P1/P2/P3 with staleness flag"""
+        """Format and rank results P1/P2/P3 with staleness flag and status"""
         if not results:
             return "No suppliers found."
         
-        ranked = {'P1': [], 'P2': [], 'P3': []}
+        ranked = {'P1': [], 'P2': [], 'P3': [], 'special': []}
         now = datetime.now()
         
         for row in results:
             result_dict = dict(row)
             supplier_id = result_dict['supplier_id']
             priority = result_dict['priority']
+            status = result_dict.get('status', 'normal')
             date_created = datetime.fromisoformat(result_dict['date_created'])
             days_old = (now - date_created).days
             
-            # Flag if older than 12 months
             needs_validation = days_old > STALENESS_DAYS
             
             result_dict['days_old'] = days_old
             result_dict['needs_validation'] = needs_validation
             result_dict['supplier_id_formatted'] = f"SUP-{supplier_id:03d}"
             
-            ranked[priority].append(result_dict)
+            # Route by status first, then priority
+            if status in ('mfr_direct', 'discontinued', 'skip'):
+                ranked['special'].append(result_dict)
+            else:
+                ranked[priority].append(result_dict)
         
         return ranked
