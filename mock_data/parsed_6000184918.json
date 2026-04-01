@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "source_file_path": "data/mock/mock_rfq.xlsm",
+    "internal_reference": "DECI-2024-001",
+    "rfq_number": "6000184918",
+    "client_contact": "John Smith",
+    "date": "2024-03-01"
+  },
+  "items": [
+    {
+      "material_number": "1000124164",
+      "long_description": "COMPRESSOR PART FRICK 534D0412C01",
+      "uom": "EA",
+      "quantity": 2,
+      "lead_time_date": "2024-06-01",
+      "lead_time_weeks": 12,
+      "sourcing_identifiers": [
+        {
+          "part_number": "534D0412C01",
+          "manufacturer": "FRICK"
+        }
+      ],
+      "flags": [],
+      "extracted_references": []
+    },
+    {
+      "material_number": "1000124165",
+      "long_description": "SEAL KIT FRICK MODEL XR 724",
+      "uom": "EA",
+      "quantity": 1,
+      "lead_time_date": "2024-06-01",
+      "lead_time_weeks": 8,
+      "sourcing_identifiers": [
+        {
+          "part_number": "XR724-SK",
+          "manufacturer": "FRICK"
+        }
+      ],
+      "flags": ["MISSING_LEAD_TIME"],
+      "extracted_references": []
+    },
+    {
+      "material_number": "1000124166",
+      "long_description": "HYDRAULIC FILTER ELEMENT",
+      "uom": "EA",
+      "quantity": 4,
+      "lead_time_date": null,
+      "lead_time_weeks": null,
+      "sourcing_identifiers": [
+        {
+          "part_number": null,
+          "manufacturer": "PARKER"
+        }
+      ],
+      "flags": ["MISSING_PART_NUMBER"],
+      "extracted_references": []
+    }
+  ],
+  "overall_flags": []
+}
