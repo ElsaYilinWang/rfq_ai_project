@@ -17,6 +17,7 @@ build/
 venv/
 .venv/
 env/
+venv312/
 
 # Jupyter notebooks checkpoints
 .ipynb_checkpoints/
@@ -34,3 +35,9 @@ mock_data/*.xlsx
 
 # Log files
 logs/
+
+# Knowledge base files
+knowledge_base/
+
+venv_wsl/
+hf_cache/

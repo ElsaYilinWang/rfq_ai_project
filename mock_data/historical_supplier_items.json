@@ -1,0 +1,74 @@
+[
+  {
+    "historical_item_id": "HIST-001",
+    "category": "spare_part",
+    "manufacturer": "FRICK",
+    "part_number": "534D0412C01",
+    "description": "SHAFT SEAL KIT FOR FRICK INDUSTRIAL REFRIGERATION COMPRESSOR",
+    "supplier_name": "Viper Industrial Supplies",
+    "supplier_email": "sales@viper-example.com",
+    "priority": "P1",
+    "evidence": "previous_po",
+    "last_interaction": "2025-10-12"
+  },
+  {
+    "historical_item_id": "HIST-002",
+    "category": "spare_part",
+    "manufacturer": "FRICK",
+    "part_number": "XR724-SK",
+    "description": "COMPRESSOR SHAFT SEAL KIT FOR INDUSTRIAL REFRIGERATION UNIT",
+    "supplier_name": "Cooling Parts Europe",
+    "supplier_email": "quotes@coolingparts-example.com",
+    "priority": "P2",
+    "evidence": "quoted_before",
+    "last_interaction": "2025-06-18"
+  },
+  {
+    "historical_item_id": "HIST-003",
+    "category": "mechanical",
+    "manufacturer": "HANSEN",
+    "part_number": "C29-0320B251",
+    "description": "BEVEL GEAR SET WITH PINION SHAFT FOR INDUSTRIAL DRIVE GEARBOX",
+    "supplier_name": "GearTech Supply",
+    "supplier_email": "sales@geartech-example.com",
+    "priority": "P2",
+    "evidence": "quoted_before",
+    "last_interaction": "2024-11-03"
+  },
+  {
+    "historical_item_id": "HIST-004",
+    "category": "fitting",
+    "manufacturer": "PARKER HANNIFIN",
+    "part_number": "OR-8891",
+    "description": "O RING SEAL FOR HYDRAULIC VALVE SUCTION FLANGE",
+    "supplier_name": "Hydraulic Components Ltd",
+    "supplier_email": "sales@hydraulic-example.com",
+    "priority": "P2",
+    "evidence": "quoted_before",
+    "last_interaction": "2025-02-09"
+  },
+  {
+    "historical_item_id": "HIST-005",
+    "category": "fitting",
+    "manufacturer": "PARKER",
+    "part_number": "OR-8892",
+    "description": "O RING FOR HYDRAULIC VALVE DISCHARGE FLANGE",
+    "supplier_name": "Hydraulic Components Ltd",
+    "supplier_email": "sales@hydraulic-example.com",
+    "priority": "P2",
+    "evidence": "quoted_before",
+    "last_interaction": "2025-02-10"
+  },
+  {
+    "historical_item_id": "HIST-006",
+    "category": "branded_equipment",
+    "manufacturer": "ABB",
+    "part_number": "M2BAX160MLA4",
+    "description": "ABB THREE PHASE ELECTRIC MOTOR 15KW 400V 50HZ",
+    "supplier_name": "EU Motor Traders",
+    "supplier_email": "rfq@eumotor-example.com",
+    "priority": "P1",
+    "evidence": "previous_po",
+    "last_interaction": "2025-12-01"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "test_case_id": "AI-CASE-001",
+    "category": "spare_part",
+    "manufacturer": "FRICK",
+    "part_number": null,
+    "description": "SEAL KIT FOR INDUSTRIAL REFRIGERATION COMPRESSOR SHAFT",
+    "expected_behavior": "AI should suggest FRICK-related suppliers based on similar compressor seal kits"
+  },
+  {
+    "test_case_id": "AI-CASE-002",
+    "category": "fitting",
+    "manufacturer": "PARKER",
+    "part_number": null,
+    "description": "HYDRAULIC O-RING FOR VALVE FLANGE CONNECTION",
+    "expected_behavior": "AI may suggest Hydraulic Components Ltd but with medium confidence"
+  },
+  {
+    "test_case_id": "AI-CASE-003",
+    "category": "mechanical",
+    "manufacturer": "UNKNOWN",
+    "part_number": null,
+    "description": "GEAR AND PINION SET FOR INDUSTRIAL DRIVE SYSTEM",
+    "expected_behavior": "AI should suggest GearTech Supply due to similarity with gearbox items"
+  },
+  {
+    "test_case_id": "AI-CASE-004",
+    "category": "branded_equipment",
+    "manufacturer": "ABB",
+    "part_number": null,
+    "description": "THREE PHASE INDUSTRIAL ELECTRIC MOTOR 15KW 400V",
+    "expected_behavior": "System should prioritize manufacturer-based sourcing, AI similarity should NOT dominate"
+  },
+  {
+    "test_case_id": "AI-CASE-005",
+    "category": "low_relevance",
+    "manufacturer": "UNKNOWN",
+    "part_number": null,
+    "description": "SAFETY GLOVES FOR GENERAL WAREHOUSE USE",
+    "expected_behavior": "AI should NOT confidently suggest any supplier"
+  }
+]
