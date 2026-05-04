@@ -9,6 +9,13 @@ import sys
 import json
 from pathlib import Path
 from datetime import datetime
+import sqlite3
+from ai_supplier_suggestion import (
+    load_embedding_model,
+    get_embeddings,
+    build_text,
+    suggest_suppliers
+)
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -23,6 +30,7 @@ class SupplierDiscoveryCLI:
         self.final_suppliers = []
         self.current_rfq_number = None
         self.parsed_rfq = None
+        self.ai_model = None  # lazy loaded on first [x] press
     
     def load_parsed_json(self, rfq_number):
         """Load parsed RFQ JSON from output folder"""
@@ -128,8 +136,21 @@ class SupplierDiscoveryCLI:
         print(f"\nOptions:")
         print(f"  [s] Select supplier from results")
         print(f"  [a] Add new supplier")
+        
+        # Show AI option only when no results found
+        has_results = bool(display_results)
+
+        if not has_results:
+            print(f"  [x] AI suggestion")
+        
         print(f"  [n] Next line item")
         print(f"  [q] Quit")
+        
+        valid = ['s', 'a', 'n', 'q']
+        if not has_results:
+            valid.append('x')
+        
+        return self.get_valid_input("Enter choice: ", valid)
         
         return self.get_valid_input("Enter choice (s/a/n/q): ", ['s', 'a', 'n', 'q'])
     
@@ -295,6 +316,9 @@ class SupplierDiscoveryCLI:
                     print("❌ Exiting.")
                     quit_flag = True  # ← CHANGE THIS
                     break
+                elif action == 'x':
+                    description = item.get("long_description", "")
+                    self.handle_ai_suggestion(material, manufacturer, description)
             
             if quit_flag:  # ← ADD THIS
                 break      # ← ADD THIS
@@ -329,6 +353,155 @@ class SupplierDiscoveryCLI:
             if choice in valid_options:
                 return choice
             print(f"❌ Invalid input. Please enter one of: {', '.join(valid_options)}")
+    
+    def get_ai_model(self):
+        """Lazy load embedding model on first AI request"""
+        if self.ai_model is None:
+            print("🤖 Loading AI model (first time only)...")
+            self.ai_model = load_embedding_model()
+        return self.ai_model
+
+    def handle_ai_suggestion(self, material_number, manufacturer, description):
+        """Handle AI supplier suggestion flow"""
+        print("\n--- AI Supplier Suggestion ---")
+        print(f"Description: {description}")
+        
+        # Ask user for category
+        print("\nCategory:")
+        print("  1 = spare_part")
+        print("  2 = fitting")
+        print("  3 = mechanical")
+        print("  4 = branded_equipment")
+        print("  5 = other")
+        
+        category_map = {
+            '1': 'spare_part',
+            '2': 'fitting',
+            '3': 'mechanical',
+            '4': 'branded_equipment',
+            '5': 'other'
+        }
+        
+        choice = self.get_valid_input(
+            "Enter category (1-5): ",
+            ['1', '2', '3', '4', '5']
+        )
+        category = category_map[choice]
+        
+        # Build test item
+        test_item = {
+            "category": category,
+            "manufacturer": manufacturer,
+            "part_number": None,
+            "description": description
+        }
+        
+        # Load model lazily
+        model = self.get_ai_model()
+        if model is None:
+            print("❌ AI model unavailable.")
+            return
+        
+        # Load historical items from knowledge base
+        historical_items = self._get_historical_items()
+        if not historical_items:
+            print("⚠️  No historical items in knowledge base yet.")
+            return
+        
+        # Get embeddings for historical items
+        historical_texts = [build_text(item) for item in historical_items]
+        historical_embeddings = get_embeddings(model, historical_texts)
+        
+        # Get suggestions
+        suggestions = suggest_suppliers(
+            test_item,
+            historical_items,
+            historical_embeddings,
+            model
+        )
+        
+        if not suggestions:
+            print("  No confident AI suggestion found.")
+            return
+        
+        print("\nAI Suggestions (human review required):")
+        for idx, suggestion in enumerate(suggestions, start=1):
+            if "note" in suggestion:
+                print(f"  ⚠️  {suggestion['note']}")
+                return
+            
+            print(f"\n  [{idx}] Supplier:   {suggestion['supplier_name']}")
+            print(f"      Email:      {suggestion['supplier_email']}")
+            print(f"      Similarity: {suggestion['similarity_score']}")
+            print(f"      Reason:     {suggestion['reason']}")
+            
+            # Ask user to confirm each suggestion
+            confirm = self.get_valid_input(
+                "  Add this supplier? (y/n): ",
+                ['y', 'n']
+            )
+            
+            if confirm == 'y':
+                # Save to knowledge base
+                supplier_id = self.db.insert_supplier(
+                    supplier_name=suggestion['supplier_name'],
+                    supplier_email=suggestion['supplier_email'],
+                    mfr_name=manufacturer
+                )
+                self.db.insert_interaction(
+                    supplier_id=supplier_id,
+                    material_number=material_number,
+                    mfr_name=manufacturer,
+                    priority='P3',  # AI suggestion = low confidence by default
+                    status='normal',
+                    reason=f"AI suggestion: {suggestion['reason']}"
+                )
+                # Add to final list
+                self.final_suppliers.append({
+                    "supplier_id": f"SUP-{supplier_id:03d}",
+                    "supplier_name": suggestion['supplier_name'],
+                    "supplier_email": suggestion['supplier_email'],
+                    "priority": "P3",
+                    "status": "normal",
+                    "ai_suggested": True
+                })
+                print(f"  ✅ Added: {suggestion['supplier_name']}")
+    
+    def _get_historical_items(self):
+        """Get historical supplier interactions from knowledge base for AI"""
+        conn = sqlite3.connect(self.db.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT s.supplier_name, s.supplier_email, s.mfr_name,
+                i.material_number, i.priority, i.reason,
+                i.date_created
+            FROM supplier s
+            JOIN interaction i ON s.supplier_id = i.supplier_id
+            WHERE i.status = 'normal'
+            ORDER BY i.date_created DESC
+        ''')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        # Convert to format expected by suggest_suppliers()
+        historical_items = []
+        for row in rows:
+            historical_items.append({
+                "historical_item_id": f"DB-{row['material_number']}",
+                "category": "unknown",
+                "manufacturer": row['mfr_name'],
+                "part_number": None,
+                "description": row['reason'] or row['mfr_name'],
+                "supplier_name": row['supplier_name'],
+                "supplier_email": row['supplier_email'],
+                "priority": row['priority'],
+                "evidence": "knowledge_base"
+            })
+        
+        return historical_items
 
 
 if __name__ == "__main__":
