@@ -420,6 +420,7 @@ class SupplierDiscoveryCLI:
             model
         )
         
+        
         if not suggestions:
             print("  No confident AI suggestion found.")
             return

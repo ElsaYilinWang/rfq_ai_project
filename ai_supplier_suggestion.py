@@ -9,7 +9,7 @@ HISTORICAL_PATH = Path("mock_data/historical_supplier_items.json")
 TEST_ITEMS_PATH = Path("mock_data/ai_test_rfq_items.json")
 
 TOP_K = 3
-SIMILARITY_THRESHOLD = 0.65
+SIMILARITY_THRESHOLD = 0.4
 
 
 def load_json(path: Path) -> List[Dict[str, Any]]:
