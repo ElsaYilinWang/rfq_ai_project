@@ -49,7 +49,7 @@
       "sourcing_identifiers": [
         {
           "part_number": null,
-          "manufacturer": "UNKNOWN_MFR"
+          "manufacturer": "PARKER"
         }
       ],
       "flags": ["MISSING_PART_NUMBER"],
