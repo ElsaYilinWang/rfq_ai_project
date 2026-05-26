@@ -10,11 +10,22 @@ class LineItemRow:
     quantity: int
     part_number: Optional[str] = None
 
+@dataclass
+class MatchedSupplier:
+    supplier_id: int
+    name: str
+    email: str
+    priority: str
+    is_stale: bool
+    country: Optional[str] = None
+    notes: Optional[str] = None
+
 
 @dataclass
 class MFRGroup:
     manufacturer: str
     line_items: List[LineItemRow]
+    matched_suppliers: List[MatchedSupplier] = field(default_factory=list)
 
 
 @dataclass
@@ -37,3 +48,5 @@ class SendResult:
     subject: str
     status: str
     error_message: str = ""
+
+
