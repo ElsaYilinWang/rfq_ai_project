@@ -10,12 +10,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 import sqlite3
-from ai_supplier_suggestion import (
-    load_embedding_model,
-    get_embeddings,
-    build_text,
-    suggest_suppliers
-)
+
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -32,9 +27,17 @@ class SupplierDiscoveryCLI:
         self.parsed_rfq = None
         self.ai_model = None  # lazy loaded on first [x] press
     
+
+    
     def load_parsed_json(self, rfq_number):
-        """Load parsed RFQ JSON from output folder"""
-        json_path = Path(f"mock_data/parsed_{rfq_number}.json")
+        """Load parsed RFQ JSON — output/ first, fallback to mock_data/"""
+        
+        # Try output/ first (work laptop — real data)
+        json_path = Path(f"output/parsed_{rfq_number}.json")
+        
+        # Fallback to mock_data/ (private laptop — mock data)
+        if not json_path.exists():
+            json_path = Path(f"mock_data/parsed_{rfq_number}.json")
         
         if not json_path.exists():
             print(f"❌ RFQ file not found: {json_path}")
@@ -152,7 +155,6 @@ class SupplierDiscoveryCLI:
         
         return self.get_valid_input("Enter choice: ", valid)
         
-        return self.get_valid_input("Enter choice (s/a/n/q): ", ['s', 'a', 'n', 'q'])
     
     def add_supplier_from_results(self, result):
         """Add selected result from knowledge base to final list"""
@@ -357,8 +359,19 @@ class SupplierDiscoveryCLI:
     def get_ai_model(self):
         """Lazy load embedding model on first AI request"""
         if self.ai_model is None:
-            print("🤖 Loading AI model (first time only)...")
-            self.ai_model = load_embedding_model()
+            try:
+                global suggest_suppliers, get_embeddings, build_text
+                from ai_supplier_suggestion import (
+                    load_embedding_model,
+                    get_embeddings,
+                    build_text,
+                    suggest_suppliers
+                )
+                print("🤖 Loading AI model (first time only)...")
+                self.ai_model = load_embedding_model()
+            except ImportError:
+                print("⚠️  AI module not available on this machine.")
+                return None
         return self.ai_model
 
     def handle_ai_suggestion(self, material_number, manufacturer, description):
