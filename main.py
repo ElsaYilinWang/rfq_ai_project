@@ -4,7 +4,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from parser.parser import parse_rfq
+from parser.parser import RFQParser
 from email_distribution.rfq_grouper import load_parsed_rfq, group_by_manufacturer
 from email_distribution.supplier_matcher import match_suppliers_to_groups
 from email_distribution.email_composer import compose_all_drafts
@@ -17,8 +17,33 @@ DB_PATH = Path(__file__).parent / "knowledge_base" / "suppliers.db"
 
 
 def extract_client_code(file_path: Path) -> str:
-    """Extract client code from file path — to be refined with work laptop."""
-    # placeholder until work laptop session confirms exact path structure
+    """Extract client code from file path by matching folder names."""
+    CLIENT_CODE_MAP = {
+        "TASNEE": "TAS",
+        "HADEED": "HAD",
+        "EGA": "EG",
+        "SABIC": "SAB",
+        "SOHAR": "SOH",
+        "SIPCHEM": "SIP",
+        "SATORP": "SAT",
+        "QAPCO": "QAP",
+        "FARABI": "FAR",
+        "SAMREF": "SAM",
+        "ALBA": "ALB",
+        "MAADEN": "MAA",
+        "CRISTAL": "CRG",
+        "QATAR GAS": "QAG",
+        "QATAR STEEL": "QAS",
+        "SHELL": "SHG",
+        "SAHM": "SAF",
+        "SASREF": "SAS",
+        "ARM": "AR",
+        "EXYTE": "EXY",
+    }
+    path_str = str(file_path).upper()
+    for keyword, code in CLIENT_CODE_MAP.items():
+        if keyword.upper() in path_str:
+            return code
     return "UNKNOWN"
 
 
@@ -38,16 +63,22 @@ def main():
     # --- parse RFQ ---
     print("\nParsing RFQ...")
     try:
-        parse_rfq(str(rfq_path))
+        output_folder = str(Path(__file__).parent / "output")
+        rfq_parser = RFQParser(str(rfq_path))
+        rfq_parser.parse(output_folder)
     except Exception as e:
         print(f"❌ Parsing failed: {e}")
         logger.error(f"Parsing failed: {e}")
         sys.exit(1)
 
     # --- load parsed output ---
-    # extract rfq number from filename
-    rfq_number = rfq_path.stem.split("_")[-1]
-    parsed_rfq = load_parsed_rfq(rfq_number)
+    import glob
+    json_files = glob.glob(str(Path(__file__).parent / "output" / "parsed_*.json"))
+    latest_json = max(json_files, key=lambda f: Path(f).stat().st_mtime)
+    with open(latest_json, "r") as f:
+        import json
+        parsed_rfq = json.load(f)
+    rfq_number = parsed_rfq["metadata"]["rfq_number"]
 
     internal_reference = parsed_rfq["metadata"]["internal_reference"]
     client_code = extract_client_code(rfq_path)
