@@ -1,238 +1,271 @@
-# RFQ AI Project
+# RFQ AI — Automated Procurement Workflow System
 
-## Overview
-A production-oriented, human-supervised AI-assisted procurement workflow system.
-Built to support real procurement operations involving RFQ handling, supplier sourcing,
-quote comparison, and supplier follow-up.
-
-> This project uses simple deterministic code where possible, and AI only where
-> ambiguity or fuzzy matching is genuinely needed.
+> *An AI-assisted system that transforms a repetitive, manual procurement process into a semi-automated pipeline — where the human only makes the decisions that matter.*
 
 ---
 
-## Project Status
-🚧 Module 1 — RFQ Parser & Validation — In Progress
+## What Is This?
+
+Every day, procurement engineers receive purchase requests from industrial clients. For each request, they must:
+
+1. Read a complex Excel spreadsheet from SAP Ariba
+2. Identify the right manufacturers and part numbers
+3. Search their inbox and memory for past supplier contacts
+4. Write and send individual RFQ (Request for Quotation) emails to each supplier
+
+For a single RFQ with 10 line items across 5 manufacturers, this can mean **hours of repetitive manual work** — copying data, formatting emails, and deciding which suppliers to contact.
+
+**This system automates that entire workflow.** It reads the Excel file, finds the right suppliers, writes the emails, and creates ready-to-send Outlook drafts — all with a single command. The engineer reviews, edits if needed, and clicks send.
+
+Think of it like a QC analyst's lab software: the system runs the process automatically and only asks the human to intervene at the moments that genuinely require judgment.
 
 ---
 
-## Module 1: RFQ Parser & Validation
+## Why I Built This
 
-### What it does
-Takes an RFQ spreadsheet (`.xlsm`) exported from SAP Ariba and already entered
-into the master tracker, and produces:
+I spent two years as a Procurement Engineer handling MRO (Maintenance, Repair & Operations) spare parts for Gulf and Middle East heavy industrial clients. The work involved real domain expertise — understanding manufacturers, supply chains, lead times, compliance requirements — but much of the execution was repetitive.
 
-1. A **normalized JSON object** — structured, machine-readable, ready for downstream modules
-2. A **modified Excel file** — the original spreadsheet with Excel comments added to
-   each Material cell, surfacing flags and extracted references for human review
+I built this project for three reasons:
 
-### What it does NOT do
-- It does not discover suppliers
-- It does not send emails
-- It does not compare quotes
-- It does not make sourcing decisions
-- It does not use AI or LLMs — this module is fully deterministic
+1. **To solve a real problem** — not a toy demo, but a system designed around actual daily workflows I extracted from my own work
+2. **To demonstrate AI engineering** — showing where AI genuinely helps versus where deterministic code is smarter, more reliable, and easier to maintain
+3. **To transition careers** — from Procurement Engineer to AI Workflow/Automation Engineer, with a portfolio piece that bridges both worlds
 
 ---
 
-### Input
-A full file path to an RFQ `.xlsm` file, for example:
+## The Core Design Philosophy
+
+### 1. Deterministic First, AI Only Where Needed
+
+Many "AI projects" add AI everywhere. This one doesn't. AI is introduced only where human-like judgment is genuinely required — specifically, where the data is too ambiguous or unstructured for rules to handle reliably.
+
+| Task | Approach | Why |
+|------|----------|-----|
+| Parse Excel structure | Deterministic | Structure is consistent |
+| Extract part numbers | Deterministic | Clear pattern (e.g. `LU400/H - GE LIGHTING`) |
+| Identify ambiguous manufacturer names | AI-assisted | Requires domain knowledge |
+| Suggest new suppliers | AI-assisted | Open-ended discovery task |
+| Generate email subject/body | Deterministic | Fixed template + structured data |
+| Select email signature | Deterministic | Simple rule (country → signature) |
+
+### 2. Human-in-the-Loop
+
+The system never sends emails automatically. At every critical decision point, it pauses and asks the engineer:
+
+- Is this supplier list correct?
+- Do you want to include stale suppliers?
+- Do you have attachments to add?
+
+This is intentional. Procurement involves real money and real relationships. The human stays in control.
+
+### 3. Modular Architecture
+
+The system is split into three independent modules, each with clear inputs and outputs. Modules can be tested, updated, or replaced without touching the others.
+
+### 4. Simple Infrastructure
+
+No cloud databases, no Docker, no Kubernetes. SQLite for storage, Python standard library where possible, win32com for Outlook integration. The right tool for the right job — not the most impressive tool.
+
+---
+
+## System Architecture
 
 ```
-C:/Users/ElsaWang/deci-ltd.com/DECI - Documents/700_Procurement/
-2. SADARA RFQ/3434.0 6000186510/3434.0 6000186510.xlsm
-```
-
-The parser accepts the file path as a clean input parameter — it does not care
-how the path was provided. This keeps the parser decoupled from the input method,
-making it easy to plug in a UI later without changing the parser itself.
-
-**v1 (current):** User provides file path manually via terminal input.
-
-**Planned UI:** A web-based interface (Streamlit) supporting both file picker and
-drag-and-drop, designed for non-technical procurement staff. Streamlit runs in a
-browser — nothing to install for end users. Drag-and-drop is prioritised because
-the procurement history contains 3400+ individual RFQ folders, making manual
-folder navigation impractical.
-
-The parser reads the **SPREADSHEET** sheet only.
-
-Sheet structure:
-- **Row 1** — RFQ-level metadata (RFQ number, client contact, date)
-- **Row 2** — Column headers
-- **Row 3 onwards** — Line items (one row per item)
-
----
-
-### Client-side fields parsed (per line item)
-
-| Field | Column | Notes |
-|---|---|---|
-| Material number | `Material` | Internal SAP material code |
-| Long description | `Long description` | Full technical description, preserved as-is |
-| Unit of measure | `UOM` | e.g. each, kg, meter |
-| Quantity | `Quantity` | Integer |
-| Sourcing identifier | `PN/MODEL/MFR` | Part number / model / manufacturer — may contain multiple entries |
-| Lead time requested | `Lead time Requested` | Contains date and week count |
-
----
-
-### Output schema
-
-#### RFQ-level
-```json
-{
-  "metadata": {
-    "source_file_path": "/path/to/3434.0_6000186510.xlsm",
-    "internal_reference": "3434",
-    "rfq_number": "6000186510",
-    "client_contact": "Mr. AlDossari, Mohammed F",
-    "date": "3/11/2026"
-  },
-  "items": [ ],
-  "overall_flags": []
-}
-```
-
-#### Line item level
-```json
-{
-  "material_number": "1000148955",
-  "long_description": "GEAR,BEVEL: SET WITH PINION SHAFT...",
-  "uom": "each",
-  "quantity": 2,
-  "lead_time_date": "23/08/2028",
-  "lead_time_weeks": 128,
-  "sourcing_identifiers": [
-    {
-      "part_number": "C29-0320B251",
-      "manufacturer": "HANSEN"
-    }
-  ],
-  "flags": [],
-  "extracted_references": []
-}
+┌─────────────────────────────────────────────────────────────┐
+│                        USER INPUT                           │
+│              Path to SAP Ariba Excel (.xlsm)                │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     MODULE 1                                │
+│                  RFQ Parser & Validator                     │
+│                                                             │
+│  • Reads SAP Ariba XLSM file                               │
+│  • Extracts metadata (RFQ number, client, date)            │
+│  • Parses line items (material, description, UOM, qty)     │
+│  • Extracts part numbers & manufacturers                   │
+│  • Flags ambiguous or missing data                         │
+│  • Writes Excel comments for human review                  │
+│                                                             │
+│  Output: parsed_<rfq_number>.json                          │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     MODULE 2                                │
+│                  Supplier Discovery                         │
+│                                                             │
+│  • Searches SQLite knowledge base by material number       │
+│  • Falls back to manufacturer name if no history           │
+│  • Flags stale suppliers (>12 months since last contact)   │
+│  • AI layer suggests new suppliers for unknown items       │
+│  • Human reviews, selects, and adds new suppliers          │
+│  • Saves all decisions to knowledge base for future use    │
+│                                                             │
+│  Input:  parsed_<rfq_number>.json                          │
+│  Output: suppliers_<rfq_number>.json                       │
+│  DB:     knowledge_base/suppliers.db (SQLite)              │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     MODULE 3                                │
+│                 Email Distribution                          │
+│                                                             │
+│  • Groups line items by manufacturer                       │
+│  • Matches suppliers to each manufacturer group            │
+│  • Generates per-supplier email drafts:                    │
+│    - Subject: DECI RFQ {ref} {client} - {MFR}             │
+│    - Salutation: Dear Mike / Dear Sir/Madam (auto-detect)  │
+│    - Body: fixed template + line item table                │
+│    - Signature: Ireland or Saudi (based on supplier country)│
+│  • Creates Outlook drafts automatically                    │
+│  • Saves audit trail JSON                                  │
+│                                                             │
+│  Input:  parsed_<rfq_number>.json +                        │
+│          suppliers_<rfq_number>.json                       │
+│  Output: Outlook Drafts + send_results_<rfq_number>.json   │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   HUMAN REVIEW                              │
+│                                                             │
+│  Engineer reviews drafts in Outlook                        │
+│  Edits if needed → clicks Send                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### Validation rules
+## Key Technical Decisions & Tradeoffs
 
-#### Hard errors (parser stops immediately)
-| Condition | Behaviour |
-|---|---|
-| RFQ number missing from cell A1 | Raise error, stop parsing |
-| RFQ number in filename does not match cell A1 | Raise error, stop parsing |
-| No line items found in SPREADSHEET sheet | Raise error, stop parsing |
+### Why SQLite instead of PostgreSQL or Oracle?
+Oracle requires significant infrastructure and IT authorisation. PostgreSQL needs a server. SQLite is a single file, zero setup, runs anywhere. For a personal workflow tool processing tens to hundreds of RFQs, SQLite is the right choice — simple, reliable, portable.
 
-#### Item-level flags (parsing continues, item is flagged)
-| Condition | Flag |
-|---|---|
-| `PN/MODEL/MFR` field is entirely blank | `missing_sourcing_identifier` |
-| A sourcing identifier entry has no part number | `missing_part_number` |
-| A sourcing identifier entry has no manufacturer | `missing_manufacturer` |
+### Why not just use ChatGPT for everything?
+Because reliability matters more than impressiveness. A deterministic function that builds an email subject line will always produce the correct format. An LLM might hallucinate a field, change the format, or fail unpredictably. AI is reserved for tasks where deterministic rules genuinely cannot work — like identifying manufacturer names from messy, unstructured text.
 
-#### RFQ-level overall flags
-Populated if any line items carry flags. Signals to the reviewer that
-at least one item needs attention.
+### Why three separate modules?
+Each module has a single responsibility and can be tested, updated, or replaced independently. If the email template changes, only Module 3 needs updating. If the supplier database schema changes, only Module 2 is affected. This is the separation of concerns principle in practice.
+
+### Why human-in-the-loop at every stage?
+Procurement involves real supplier relationships and real money. An automated system that sends the wrong email to the wrong supplier causes real damage. The system is designed to be a powerful assistant, not an autonomous agent.
+
+### Why an email sender abstraction layer?
+The `email_sender/` module defines a base interface (`BaseEmailSender`) that any email provider can implement. Currently supports Outlook (via `win32com`) and a Mock sender (for testing). Adding Gmail or another provider in future requires zero changes to the rest of the codebase — just a new implementation file.
 
 ---
 
-### PN/MODEL/MFR parsing rules
-- Multiple entries are separated by newline `\n`
-- Each entry is split into `part_number` and `manufacturer` using ` - ` or ` / ` as separator
-- Validation runs **after** parsing is complete — not during
-- If blank, item is flagged as `missing_sourcing_identifier`
+## Project Structure
 
----
-
-### Lead time parsing rules
-- Expected format: `28/05/2026\n11 Weeks`
-- Date extracted using pattern `DD/MM/YYYY`
-- Weeks extracted using pattern `<number> Weeks`
-- Both stored separately as `lead_time_date` and `lead_time_weeks`
-
----
-
-### Output files
-
-#### 1. JSON file
-- Saved to a user-specified output folder
-- Named: `parsed_<rfq_number>.json`
-- Contains the full normalized RFQ object
-
-#### 2. Modified Excel file
-- Saved back to the original file location (overwrites original)
-- Original data is completely unchanged
-- Excel comments are added to the **Material cell** of each line item
-- Each comment contains all flags and extracted references for that item
-- No new columns are added
-
----
-
-### Project structure
 ```
 rfq_ai_project/
+├── parser/                    # Module 1 — RFQ Parser
+│   ├── parser.py              # RFQParser class
+│   ├── validators.py          # field validation rules
+│   ├── schemas.py             # data structures
+│   └── logger.py              # rotating file logger
 │
-├── .env                    # API keys — never committed
-├── .gitignore
-├── README.md
+├── supplier_discovery.py      # Module 2 — core DB operations
+├── ai_supplier_suggestion.py  # Module 2 — AI suggestion layer
+├── cli.py                     # Module 2 — interactive CLI
 │
-├── parser/
-│   ├── __init__.py
-│   ├── parser.py           # Main RFQParser class — file I/O, orchestration
-│   ├── validators.py       # Flag generation logic
-│   └── schemas.py          # Dataclasses: ParsedRFQ, LineItem, SourcingIdentifier
+├── email_distribution/        # Module 3 — Email Pipeline
+│   ├── rfq_grouper.py         # group line items by manufacturer
+│   ├── supplier_matcher.py    # match suppliers from DB to groups
+│   ├── email_composer.py      # generate email content
+│   ├── outlook_sender.py      # orchestrate sending + audit trail
+│   ├── schemas.py             # Module 3 data structures
+│   └── logger.py              # rotating file logger
 │
-├── output/                 # JSON output files — gitignored
+├── email_sender/              # Email provider abstraction
+│   ├── base.py                # abstract interface
+│   ├── outlook.py             # Outlook implementation (win32com)
+│   └── mock.py                # mock for testing
 │
-├── mock_data/              # Test RFQ files — .xlsm files gitignored
-│   └── README.md
-│
-└── tests/
-    ├── __init__.py
-    └── test_parser.py
+├── tests/                     # full test suite — 45/45 passing
+├── mock_data/                 # mock inputs for testing
+├── knowledge_base/            # suppliers.db (gitignored)
+├── output/                    # JSON outputs (gitignored)
+├── logs/                      # rotating logs (gitignored)
+└── main.py                    # interactive pipeline entry point
 ```
 
 ---
 
-### Known limitations and future considerations
-- **BPA (Blanket Purchase Agreement) files** — RFQs with hundreds or thousands of
-  line items are out of scope for v1. In practice these are rare (~10% of RFQs) and
-  are strategically split into chunks before processing. BPA support is a planned
-  future enhancement.
-- **File path formats** — the parser handles both Windows (`C:\Users\...`) and
-  Unix-style (`/Users/...`) paths via Python's `pathlib`, making it portable across
-  machines and operating systems.
+## How to Run
 
----
-
-### Dependencies
-```
-openpyxl
-pathlib
-dataclasses
-re
-json
+### Prerequisites
+```bash
+pip install -r requirements.txt
 ```
 
----
+### Run the full pipeline
+```bash
+python main.py
+```
 
-### Usage (planned)
-```python
-from parser.parser import RFQParser
+You will be guided through:
+1. Enter the path to your RFQ Excel file
+2. Review the supplier list found
+3. Confirm attachments (if any)
+4. Review generated Outlook drafts
+5. Send when ready
 
-parser = RFQParser(file_path="path/to/3434.0_6000186510.xlsm")
-result = parser.parse(output_json_folder="path/to/output/")
+### Run tests
+```bash
+python tests/test_parser.py
+python tests/test_supplier_discovery.py
+python tests/test_rfq_grouper.py
+python tests/test_supplier_matcher.py
+python tests/test_email_composer.py
+python tests/test_outlook_sender.py
 ```
 
 ---
 
-## Future Modules (Planned)
-- **Module 2** — Supplier Discovery Assistant
-- **Module 3** — Quote Extraction Assistant
-- **Module 4** — Supplier Comparison Assistant
-- **Module 5** — Human-supervised Submission Support
+## Test Results
+
+```
+Module 1 — RFQ Parser:          8/8  ✓
+Module 2 — Supplier Discovery:  6/6  ✓
+Module 3 — RFQ Grouper:         7/7  ✓
+Module 3 — Supplier Matcher:    8/8  ✓
+Module 3 — Email Composer:      9/9  ✓
+Module 3 — Outlook Sender:      7/7  ✓
+──────────────────────────────────────
+TOTAL:                         45/45 ✓
+```
+
+End-to-end tested on real SAP Ariba RFQ data from live procurement operations.
 
 ---
 
-*Built as part of a career transition toward AI Workflow / AI Automation Engineering roles.*
+## What I Learned Building This
+
+**On system design:** Spending time extracting and mapping a real workflow before writing code is not slow — it is the work. The architecture decisions made early (modular design, deterministic-first, human-in-the-loop) held up through all three modules without needing to be revisited.
+
+**On AI engineering:** The most important skill is knowing when *not* to use AI. Every place where I introduced deterministic logic instead of an LLM is a place where the system is faster, more reliable, and easier to test.
+
+**On learning:** I used a Socratic approach with AI assistance throughout — reasoning through every decision before receiving guidance, rather than copying answers. This made the learning stick and the design genuinely mine.
+
+---
+
+## About the Developer
+
+**Elsa (Yilin) Wang**
+Procurement Engineer → AI Workflow/Automation Engineer
+
+- MEng Industrial Engineering & Operations Research — UC Berkeley
+- MSc International Software Development (First Class Honours) — University of Limerick
+- 2+ years SaaS application support (Navis, Oakland CA)
+- 2+ years MRO procurement engineering (DECI Ltd, Limerick Ireland)
+
+This project sits at the intersection of both worlds: deep procurement domain knowledge combined with software engineering and AI workflow design.
+
+
+---
+
+*Built with Python, SQLite, OpenAI API, win32com, and a lot of real procurement experience.*
