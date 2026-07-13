@@ -261,7 +261,7 @@ Module 3 — Outlook Sender:      7/7  ✓
 TOTAL:                         45/45 ✓
 ```
 
-End-to-end tested on real SAP Ariba RFQ data from live procurement operations.
+End-to-end workflow tested using realistic RFQ-style scenarios based on hands-on procurement experience. The portfolio/demo version uses mock and sanitized data only and does not include confidential company, client, supplier, pricing, or RFQ data.
 
 ---
 
