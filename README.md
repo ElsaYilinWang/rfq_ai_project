@@ -1,8 +1,30 @@
+
 # RFQ AI — Automated Procurement Workflow System
 
 > *An AI-assisted system that transforms a repetitive, manual procurement process into a semi-automated pipeline — where the human only makes the decisions that matter.*
 
 ---
+
+# RFQ AI — AI-Assisted Procurement Workflow System
+
+*An AI-assisted workflow automation project for industrial RFQ processing.
+
+This project parses RFQ-style input, validates key procurement fields, discovers likely suppliers from a local knowledge base, generates supplier-specific RFQ email drafts, and keeps the human in control before any supplier communication is sent.*
+
+## Project Status / Data Disclaimer
+
+This is a private portfolio project inspired by real procurement workflow experience. It was built independently and uses mock or sanitized RFQ-style data for demonstration.
+
+It was not deployed at DECI and does not contain confidential company, client, supplier, pricing, or RFQ data.
+
+## What This Demonstrates
+
+- Practical workflow automation for an enterprise procurement process
+- Deterministic-first engineering: rules and validation before AI assistance
+- Human-in-the-loop checkpoints for supplier selection and email review
+- Modular Python architecture: parser, supplier discovery, email generator, sender abstraction
+- Testable components with schemas, logging, mock sender, and audit-trail outputs
+
 
 ## What Is This?
 
