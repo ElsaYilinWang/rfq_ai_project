@@ -45,13 +45,255 @@ Think of it like a QC analyst's lab software: the system runs the process automa
 
 ## Why I Built This
 
-I spent two years as a Procurement Engineer handling MRO (Maintenance, Repair & Operations) spare parts for Gulf and Middle East heavy industrial clients. The work involved real domain expertise — understanding manufacturers, supply chains, lead times, compliance requirements — but much of the execution was repetitive.
+I spent one year as a Procurement Engineer handling MRO (Maintenance, Repair & Operations) spare parts for Gulf and Middle East heavy industrial clients. The work involved real domain expertise — understanding manufacturers, supply chains, lead times, compliance requirements — but much of the execution was repetitive.
 
 I built this project for three reasons:
 
 1. **To solve a real problem** — not a toy demo, but a system designed around actual daily workflows I extracted from my own work
 2. **To demonstrate AI engineering** — showing where AI genuinely helps versus where deterministic code is smarter, more reliable, and easier to maintain
 3. **To transition careers** — from Procurement Engineer to AI Workflow/Automation Engineer, with a portfolio piece that bridges both worlds
+
+---
+
+## Production-Oriented Workflow Design
+
+This project is a private portfolio implementation using mock and sanitized RFQ-style data. It was not deployed in a production environment, but it was designed around production-oriented workflow concerns: evaluation, observability, permission control, traceability, and human review.
+
+The goal is not to build a fully autonomous procurement agent. The goal is to demonstrate how an AI-assisted workflow can support procurement engineers while keeping high-risk decisions under human control.
+
+---
+
+## Evaluation Approach
+
+The system can be evaluated at multiple points in the RFQ workflow rather than only at the final output.
+
+### 1. RFQ Extraction Accuracy
+
+Module 1 parses RFQ-style input into structured fields such as RFQ number, client, material number, manufacturer, part number, description, quantity, and unit of measure.
+
+Useful evaluation metrics include:
+
+* Field-level extraction accuracy
+* Missing-field detection rate
+* Manufacturer extraction accuracy
+* Part-number extraction accuracy
+* Validation flag accuracy
+
+Example bad-case categories:
+
+* Missing manufacturer
+* Missing part number
+* Ambiguous manufacturer name
+* Description-only item with no clear part number
+* Replacement or superseded part reference
+* Invalid quantity or unit of measure
+* Incomplete RFQ metadata
+
+This matters because downstream supplier discovery and email generation depend on clean structured data. If extraction fails silently, the system may contact the wrong supplier or generate an incomplete RFQ email.
+
+### 2. Supplier Matching Quality
+
+Module 2 searches a local supplier knowledge base and matches suppliers to manufacturer or material information.
+
+Useful evaluation metrics include:
+
+* Top-1 supplier match correctness
+* Top-k supplier coverage
+* Match source distribution: historical match, manufacturer fallback, AI suggestion, or manual entry
+* Stale supplier detection rate
+* Human override rate
+
+Example bad-case categories:
+
+* No supplier found for manufacturer
+* Supplier found but marked stale
+* Supplier matched by manufacturer but not by exact material number
+* Duplicate supplier records
+* Supplier country or contact information missing
+* AI-suggested supplier requires human verification
+
+This matters because supplier discovery is not only a search problem. It also involves trust, freshness, prior experience, and human judgment.
+
+### 3. Human Edit Rate
+
+The system should be judged not only by whether it produces an output, but by how much human correction is needed.
+
+Useful metrics include:
+
+* Percentage of generated emails edited by the user
+* Average number of edited fields per draft
+* Supplier list approval rate
+* Supplier list override rate
+* Number of RFQ items requiring manual review
+* Number of drafts blocked before sending
+
+A lower human edit rate suggests the workflow is reducing repetitive work effectively. A higher edit rate may indicate weak parsing, poor supplier matching, unclear email formatting, or missing business rules.
+
+### 4. End-to-End Workflow Success
+
+An end-to-end run can be evaluated by checking whether:
+
+* The RFQ input is parsed without crashing
+* Required fields are either extracted or flagged
+* Supplier candidates are returned with evidence
+* Email drafts are generated in the expected format
+* No real email is sent without human review
+* An audit trail is saved for later inspection
+
+The evaluation goal is not to claim perfect automation. The goal is to make system behavior measurable, reviewable, and improvable.
+
+---
+
+## Observability and Logging
+
+The project uses logging and JSON outputs to make workflow behavior inspectable. In a production enterprise workflow, observability is important because silent failures can create operational risk.
+
+For each workflow run, the system should ideally record:
+
+* Input file name or RFQ identifier
+* Parsed RFQ metadata
+* Number of line items processed
+* Number of validation warnings
+* Supplier matching source for each item or manufacturer
+* Generated draft count
+* Execution time per module
+* Errors or exceptions
+* Human intervention points
+* Final user decision: approved, edited, skipped, or blocked
+
+Example log events:
+
+* RFQ file received
+* RFQ parsing started
+* RFQ parsing completed
+* Validation warning generated
+* Supplier lookup started
+* Supplier found from history
+* Supplier marked stale
+* AI suggestion requested
+* Human approval required
+* Email draft generated
+* Email sending blocked pending review
+* Audit trail saved
+
+This makes the system easier to debug and safer to operate. Instead of only seeing the final draft, the user can understand what happened at each step.
+
+---
+
+## Safety and Permission Model
+
+The system is intentionally designed as a human-supervised workflow, not a fully autonomous procurement agent.
+
+### Automatic Read Actions
+
+The system can safely perform read-only actions such as:
+
+* Reading mock RFQ-style input files
+* Parsing structured RFQ fields
+* Searching a local supplier knowledge base
+* Reading historical supplier records
+* Loading email templates
+* Loading validation rules
+
+These actions do not create external business impact.
+
+### Automatic Low-Risk Actions
+
+The system can automatically perform low-risk internal actions such as:
+
+* Generating structured JSON output
+* Creating validation warnings
+* Ranking supplier candidates
+* Grouping RFQ line items by manufacturer
+* Generating draft email content
+* Saving logs and audit trails
+
+These actions support the human user but do not contact suppliers or commit business decisions.
+
+### Approval-Required Actions
+
+The following actions require human approval:
+
+* Selecting final suppliers to contact
+* Using stale supplier records
+* Accepting AI-suggested suppliers
+* Adding new supplier records to the knowledge base
+* Attaching files to RFQ emails
+* Sending RFQ emails externally
+* Proceeding when required RFQ fields are missing or ambiguous
+
+These steps involve supplier relationships, commercial risk, or incomplete data, so the human remains responsible.
+
+### Prohibited Actions
+
+The system should not:
+
+* Send emails without human review
+* Invent missing supplier contact details
+* Invent manufacturer names, part numbers, prices, certificates, or lead times
+* Override validation warnings without user confirmation
+* Access confidential company systems without authorization
+* Store confidential client, supplier, pricing, or RFQ data in the public/demo version
+
+This permission model keeps the system useful while reducing the risk of incorrect or unauthorized actions.
+
+---
+
+## Traceability and Explainability
+
+Each recommendation or warning should be explainable to the user.
+
+For supplier selection, the system should show:
+
+* Which supplier was selected
+* Which manufacturer or material number triggered the match
+* Whether the match came from historical data, manufacturer fallback, AI suggestion, or manual entry
+* Whether the supplier is stale
+* What human approval is required before proceeding
+
+For validation failures, the system should show:
+
+* Which RFQ line item failed validation
+* Which field is missing or ambiguous
+* Why the issue matters
+* Whether the workflow can continue or should pause for review
+
+For human approval, the system should show:
+
+* What action is being requested
+* Why approval is required
+* What evidence the system used
+* What the risk is if the user proceeds
+
+This makes the workflow easier to trust. The user is not asked to blindly accept an AI recommendation; they are shown the evidence and the reason for review.
+
+---
+
+## Feedback Loop
+
+The workflow can improve over time through human feedback.
+
+Examples of useful feedback include:
+
+* User accepts a supplier recommendation
+* User rejects a supplier recommendation
+* User marks a supplier as stale or no longer useful
+* User manually adds a better supplier
+* User edits generated email wording
+* User flags missing manufacturer or part-number information
+* User blocks an email draft before sending
+
+This feedback can be used to improve:
+
+* Supplier ranking
+* Supplier freshness rules
+* Manufacturer normalization
+* Validation rules
+* Email templates
+* Bad-case handling
+
+The important design principle is that feedback should be captured as structured workflow data, not only as informal user memory. This allows future evaluation and improvement without making the system fully autonomous.
+
 
 ---
 
