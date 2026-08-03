@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RFQ AI Review Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <main class="container">
+    <header>
+      <h1>RFQ AI Review Dashboard</h1>
+      <p>
+        A lightweight review page for checking parsed RFQ status,
+        validation warnings, and next action.
+      </p>
+    </header>
+
+    <section class="card">
+      <h2>Sample RFQ Review</h2>
+      <p>
+        Click the button below to call the FastAPI backend endpoint:
+        <code>GET /rfqs/sample</code>
+      </p>
+
+      <button id="load-rfq-btn">Load Sample RFQ</button>
+    </section>
+
+    <section class="card" id="result-card">
+      <h2>RFQ Result</h2>
+
+      <div class="result-row">
+        <strong>RFQ Number:</strong>
+        <span id="rfq-number">Not loaded yet</span>
+      </div>
+
+      <div class="result-row">
+        <strong>Status:</strong>
+        <span id="status">Not loaded yet</span>
+      </div>
+
+      <div class="result-row">
+        <strong>Items Processed:</strong>
+        <span id="items-processed">Not loaded yet</span>
+      </div>
+
+      <div class="result-row">
+        <strong>Next Action:</strong>
+        <span id="next-action">Not loaded yet</span>
+      </div>
+
+      <div class="result-row">
+        <strong>Trace ID:</strong>
+        <span id="trace-id">Not loaded yet</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Validation Warnings</h2>
+      <ul id="warnings-list">
+        <li>No warnings loaded yet.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Interview Explanation</h2>
+      <p>
+        This page represents a simple frontend client. It calls the FastAPI
+        backend, receives a JSON response, and displays the RFQ status,
+        validation warnings, next action, and trace ID for human review.
+      </p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
