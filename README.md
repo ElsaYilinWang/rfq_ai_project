@@ -24,7 +24,8 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Human-in-the-loop checkpoints for supplier selection and email review
 - Modular Python architecture: parser, supplier discovery, email generator, sender abstraction
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
-
+- API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
+- Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
 
 ## What Is This?
 
@@ -37,7 +38,7 @@ Every day, procurement engineers receive purchase requests from industrial clien
 
 For a single RFQ with 10 line items across 5 manufacturers, this can mean **hours of repetitive manual work** — copying data, formatting emails, and deciding which suppliers to contact.
 
-**This system automates that entire workflow.** It reads the Excel file, finds the right suppliers, writes the emails, and creates ready-to-send Outlook drafts — all with a single command. The engineer reviews, edits if needed, and clicks send.
+**This system semi-automates that entire workflow.** It reads the Excel file, finds the right suppliers, writes the emails, and creates ready-to-send Outlook drafts — all with a single command. The engineer reviews, edits if needed, and clicks send.
 
 Think of it like a QC analyst's lab software: the system runs the process automatically and only asks the human to intervene at the moments that genuinely require judgment.
 
@@ -60,6 +61,59 @@ I built this project for three reasons:
 This project is a private portfolio implementation using mock and sanitized RFQ-style data. It was not deployed in a production environment, but it was designed around production-oriented workflow concerns: evaluation, observability, permission control, traceability, and human review.
 
 The goal is not to build a fully autonomous procurement agent. The goal is to demonstrate how an AI-assisted workflow can support procurement engineers while keeping high-risk decisions under human control.
+
+---
+
+## API + Frontend Review Layer
+
+In addition to the original command-line workflow, I added a lightweight API and browser review layer to make the RFQ workflow easier to inspect from a client interface.
+
+This layer is intentionally small. It does not replace the core parser, supplier discovery, or email distribution modules. Instead, it exposes a sample RFQ review response through FastAPI and displays the result in a simple frontend dashboard.
+
+### What the API Layer Demonstrates
+
+- `GET /health` confirms that the FastAPI service is running.
+- `GET /rfqs/sample` returns a structured sample RFQ parse response.
+- Pydantic models define the external API response contract.
+- A converter maps internal parser dataclasses into API-friendly JSON.
+- The response includes RFQ number, validation status, item count, warnings, next action, and trace ID.
+- CORS middleware is enabled for local frontend-backend development.
+
+### What the Frontend Demonstrates
+
+The frontend is a lightweight HTML/CSS/JavaScript review dashboard. It calls the FastAPI backend using `fetch()`, receives JSON, and displays:
+
+- RFQ number
+- Parsing / validation status
+- Number of items processed
+- Validation warnings
+- Next recommended action
+- Trace ID for debugging
+
+This is not a full production frontend. It is a small review interface designed to demonstrate how a web or mobile-style client could consume the RFQ workflow through a REST API.
+
+### Example API Response
+
+```json
+{
+  "rfq_number": "RFQ-DEMO-001",
+  "status": "validation_warning",
+  "items_processed": 2,
+  "warnings": [
+    {
+      "line_item": 2,
+      "field": "line_item",
+      "message": "No manufacturer or part number extracted from description."
+    },
+    {
+      "line_item": 2,
+      "field": "sourcing_identifiers",
+      "message": "No manufacturer or part number extracted; human review required."
+    }
+  ],
+  "next_action": "review_required",
+  "trace_id": "demo_run_001"
+}
 
 ---
 
@@ -402,6 +456,30 @@ No cloud databases, no Docker, no Kubernetes. SQLite for storage, Python standar
 ```
 
 ---
+### API / Frontend Review Flow
+
+```text
+Browser Review Dashboard
+        │
+        │  JavaScript fetch()
+        ▼
+FastAPI REST API
+        │
+        │  GET /rfqs/sample
+        ▼
+API Response Schema
+        │
+        │  Pydantic response model
+        ▼
+Converter Layer
+        │
+        │  internal parser dataclass → API-friendly JSON
+        ▼
+Parsed RFQ Review Response
+        │
+        ▼
+Human reviews status, warnings, next action, and trace ID
+---
 
 ## Key Technical Decisions & Tradeoffs
 
@@ -455,7 +533,16 @@ rfq_ai_project/
 ├── output/                    # JSON outputs (gitignored)
 ├── logs/                      # rotating logs (gitignored)
 └── main.py                    # interactive pipeline entry point
-```
+├── api/                       # FastAPI review API layer
+│   ├── main.py                # API entry point, health check, sample RFQ endpoint
+│   ├── schemas.py             # Pydantic API response models
+│   ├── converters.py          # maps parser dataclasses to API responses
+│   └── routes/                # placeholder for future route organization
+│
+├── frontend/                  # lightweight browser review dashboard
+│   ├── index.html             # page structure
+│   ├── app.js                 # calls FastAPI endpoint using fetch()
+│   └── style.css              # simple dashboard styling
 
 ---
 
@@ -477,6 +564,21 @@ You will be guided through:
 3. Confirm attachments (if any)
 4. Review generated Outlook drafts
 5. Send when ready
+
+### Run the FastAPI review API
+
+```bash
+uvicorn api.main:app --reload
+
+Then open:
+
+http://127.0.0.1:8000/health
+
+or:
+
+http://127.0.0.1:8000/rfqs/sample
+
+With the FastAPI server running, open: frontend/index.html
 
 ### Run tests
 ```bash
@@ -514,6 +616,26 @@ End-to-end workflow tested using realistic RFQ-style scenarios based on hands-on
 **On AI engineering:** The most important skill is knowing when *not* to use AI. Every place where I introduced deterministic logic instead of an LLM is a place where the system is faster, more reliable, and easier to test.
 
 **On learning:** I used a Socratic approach with AI assistance throughout — reasoning through every decision before receiving guidance, rather than copying answers. This made the learning stick and the design genuinely mine.
+
+## Current Limitations
+
+- The FastAPI layer currently exposes a sample RFQ review endpoint, not the full Excel upload workflow.
+- The frontend is a lightweight local review dashboard, not a deployed production web application.
+- The API response currently demonstrates parser-to-client response mapping using mock RFQ data.
+- Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
+- The project remains a portfolio/demo system using mock or sanitized data only.
+
+## Future Improvements
+
+Possible next steps include:
+
+- Add a real `POST /rfqs/parse` endpoint for file upload or controlled mock file-path parsing.
+- Add supplier discovery endpoints such as `GET /rfqs/{rfq_number}/suppliers`.
+- Add draft preview endpoints before Outlook draft creation.
+- Improve warning normalization so duplicate or overlapping validation messages are grouped cleanly.
+- Add API-level tests for FastAPI endpoints and converter behavior.
+- Add a mobile-style client example showing how another client could consume the same JSON contract.
+- Add semantic supplier fallback using embeddings/vector search only after deterministic supplier lookup fails.
 
 ---
 
