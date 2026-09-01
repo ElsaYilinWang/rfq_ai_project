@@ -24,7 +24,13 @@ no warnings?
 
 from typing import List
 
-from api.schemas import RFQParseResponse, ValidationWarning
+from api.schemas import (
+    RFQParseResponse,
+    ValidationWarning,
+    LineItemResponse,
+    RFQItemsResponse,
+)
+
 from parser.schemas import ParsedRFQ
 
 
@@ -110,4 +116,54 @@ def parsed_rfq_to_api_response(
         warnings=warnings,
         next_action=next_action,
         trace_id=trace_id
+    )
+
+
+def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
+    """
+    Convert the internal parser ParsedRFQ dataclass into a line-item-level
+    API response.
+
+    Internal model:
+        LineItem -> material_number, long_description, uom, quantity,
+        sourcing_identifiers (List[SourcingIdentifier]), flags
+
+    API model:
+        LineItemResponse -> line_item, material_number, description,
+        manufacturer, part_number, uom, quantity, flags
+
+    Key transformation:
+        An item can carry MULTIPLE sourcing_identifiers internally.
+        The API flattens this to a single manufacturer/part_number pair,
+        taking the first identifier as "primary." Surfacing alternates
+        is a candidate for a later phase.
+    """
+
+    item_responses: List[LineItemResponse] = []
+
+    for index, item in enumerate(parsed_rfq.items, start=1):
+        primary_identifier = (
+            item.sourcing_identifiers[0] if item.sourcing_identifiers else None
+        )
+
+        item_responses.append(
+            LineItemResponse(
+                line_item=index,
+                material_number=item.material_number,
+                description=item.long_description,
+                manufacturer=(
+                    primary_identifier.manufacturer if primary_identifier else None
+                ),
+                part_number=(
+                    primary_identifier.part_number if primary_identifier else None
+                ),
+                uom=item.uom,
+                quantity=item.quantity,
+                flags=item.flags,
+            )
+        )
+
+    return RFQItemsResponse(
+        rfq_number=parsed_rfq.metadata.rfq_number,
+        items=item_responses,
     )

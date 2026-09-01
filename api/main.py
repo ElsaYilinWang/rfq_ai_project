@@ -10,9 +10,8 @@ from parser.schemas import (
     SourcingIdentifier,
 )
 
-from api.converters import parsed_rfq_to_api_response
-from api.schemas import RFQParseResponse
-
+from api.converters import parsed_rfq_to_api_response, parsed_rfq_to_items_response
+from api.schemas import RFQParseResponse, RFQItemsResponse
 
 app = FastAPI(title="RFQ AI Review API")
 
@@ -25,21 +24,9 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
-def health_check():
-    return {"status": "ok"}
-
-
-@app.get("/rfqs/sample", response_model=RFQParseResponse)
-def get_sample_rfq():
-    """
-    Return a mock parsed RFQ response.
-
-    This endpoint proves the API schema boundary before connecting
-    the real Excel parser or file upload.
-    """
-
-    sample_parsed_rfq = ParsedRFQ(
+def build_sample_parsed_rfq() -> ParsedRFQ:
+    """Builds the mock parsed RFQ shared by all /rfqs/sample* endpoints."""
+    return ParsedRFQ(
         metadata=RFQMetadata(
             source_file_path="mock_data/sample_rfq.xlsm",
             internal_reference="INT-DEMO-001",
@@ -54,10 +41,7 @@ def get_sample_rfq():
                 uom="EA",
                 quantity=2,
                 sourcing_identifiers=[
-                    SourcingIdentifier(
-                        manufacturer="ABB",
-                        part_number="CB-10A"
-                    )
+                    SourcingIdentifier(manufacturer="ABB", part_number="CB-10A")
                 ],
                 flags=[],
             ),
@@ -67,15 +51,30 @@ def get_sample_rfq():
                 uom="EA",
                 quantity=1,
                 sourcing_identifiers=[],
-                flags=[
-                    "No manufacturer or part number extracted from description."
-                ],
+                flags=["No manufacturer or part number extracted from description."],
             ),
         ],
         overall_flags=[]
     )
 
+
+@app.get("/rfqs/sample", response_model=RFQParseResponse)
+def get_sample_rfq():
+    """
+    Return a mock parsed RFQ response.
+
+    This endpoint proves the API schema boundary before connecting
+    the real Excel parser or file upload.
+    """
     return parsed_rfq_to_api_response(
-        parsed_rfq=sample_parsed_rfq,
+        parsed_rfq=build_sample_parsed_rfq(),
         trace_id="demo_run_001"
     )
+
+
+@app.get("/rfqs/sample/items", response_model=RFQItemsResponse)
+def get_sample_rfq_items():
+    """
+    Return line-item-level detail for the sample RFQ.
+    """
+    return parsed_rfq_to_items_response(build_sample_parsed_rfq())
