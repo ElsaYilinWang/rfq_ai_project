@@ -53,3 +53,25 @@ code {
 #warnings-list li {
   margin-bottom: 8px;
 }
+
+#items-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+#items-table th,
+#items-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee;
+}
+
+#items-table th {
+  background-color: #f0f2f5;
+}
+
+.flagged-row {
+  background-color: #fff6e5;
+}
