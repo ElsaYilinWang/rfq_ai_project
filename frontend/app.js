@@ -24,6 +24,10 @@ async function loadSampleRFQ() {
 
     // 5. Also load and display the line-item detail for the same RFQ
     await loadSampleRFQItems();
+
+    // 6. Also load and display supplier candidates for the same RFQ
+    await loadSupplierCandidates();
+
   } catch (error) {
     console.error("Failed to load sample RFQ:", error);
     displayError(error.message);
@@ -80,6 +84,67 @@ function displayItemsTable(items) {
 function displayItemsError(message) {
   const tableBody = document.getElementById("items-table-body");
   tableBody.innerHTML = `<tr><td colspan="8">Error: ${message}</td></tr>`;
+}
+
+async function loadSupplierCandidates() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/rfqs/sample/supplier-candidates`);
+
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
+    }
+
+    const data = await response.json();
+    displaySupplierCandidatesTable(data.supplier_candidates);
+  } catch (error) {
+    console.error("Failed to load supplier candidates:", error);
+    displaySupplierCandidatesError(error.message);
+  }
+}
+
+// Turns true/false/null into readable text instead of the raw JS value,
+// per the "true/false values should be readable" requirement.
+function formatBoolean(value) {
+  if (value === null || value === undefined) {
+    return "N/A";
+  }
+  return value ? "Yes" : "No";
+}
+
+function displaySupplierCandidatesTable(candidates) {
+  const tableBody = document.getElementById("supplier-candidates-table-body");
+  tableBody.innerHTML = "";
+
+  if (!candidates || candidates.length === 0) {
+    tableBody.innerHTML = `<tr><td colspan="6">No supplier candidates found.</td></tr>`;
+    return;
+  }
+
+  candidates.forEach((candidate) => {
+    const row = document.createElement("tr");
+
+    // Reuses the same flagged-row highlight as the items table — both
+    // mean the same thing: this row needs a human to look at it.
+    if (candidate.human_review_required) {
+      row.classList.add("flagged-row");
+    }
+
+    row.innerHTML = `
+      <td>${candidate.supplier_name}</td>
+      <td>${candidate.manufacturer ?? "N/A"}</td>
+      <td>${candidate.source}</td>
+      <td>${formatBoolean(candidate.stale)}</td>
+      <td>${formatBoolean(candidate.human_review_required)}</td>
+      <td>${candidate.reason}</td>
+    `;
+
+    tableBody.appendChild(row);
+  });
+}
+
+function displaySupplierCandidatesError(message) {
+  const tableBody = document.getElementById("supplier-candidates-table-body");
+  tableBody.innerHTML = `<tr><td colspan="6">Error: ${message}</td></tr>`;
 }
 
 function displayRFQResult(data) {
