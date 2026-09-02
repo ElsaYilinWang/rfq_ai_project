@@ -10,8 +10,12 @@ from parser.schemas import (
     SourcingIdentifier,
 )
 
-from api.converters import parsed_rfq_to_api_response, parsed_rfq_to_items_response
-from api.schemas import RFQParseResponse, RFQItemsResponse
+from api.converters import (
+    parsed_rfq_to_api_response,
+    parsed_rfq_to_items_response,
+    build_mock_supplier_candidates_response,
+)
+from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
 
 app = FastAPI(title="RFQ AI Review API")
 
@@ -78,3 +82,20 @@ def get_sample_rfq_items():
     Return line-item-level detail for the sample RFQ.
     """
     return parsed_rfq_to_items_response(build_sample_parsed_rfq())
+
+@app.get(
+    "/rfqs/sample/supplier-candidates",
+    response_model=SupplierCandidatesResponse
+)
+def get_sample_rfq_supplier_candidates():
+    """
+    Return mock supplier candidates for the sample RFQ.
+
+    Mock data only — a later phase connects this to the real SQLite
+    supplier knowledge base via supplier_discovery.py, at which point
+    only build_mock_supplier_candidates_response's replacement needs
+    to change, not this route.
+    """
+
+    rfq_number = build_sample_parsed_rfq().metadata.rfq_number
+    return build_mock_supplier_candidates_response(rfq_number)

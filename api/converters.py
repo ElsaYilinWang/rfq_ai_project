@@ -1,4 +1,26 @@
 # api/converters.py
+"""
+Design note — why supplier candidates get a converter function too:
+
+Phase 3's mock supplier-candidate data could have been built directly
+inside the /rfqs/sample/supplier-candidates route in main.py — that's
+literally what the project plan for this week specifies, and it would
+work fine for a demo.
+
+Instead it lives here, following the same pattern as
+parsed_rfq_to_api_response and parsed_rfq_to_items_response: main.py
+stays a thin routing layer, and this file owns the actual data
+transformation/decision logic.
+
+The payoff shows up later, not now: when Phase 3/4 eventually connects
+to the real SQLite supplier knowledge base (supplier_discovery.py)
+instead of mock data, only the body of this function changes. The
+route in main.py, and the response schema in schemas.py, stay exactly
+as they are. If the mock data had been built inline in the route,
+that swap would mean editing main.py and mixing routing logic with
+business logic again.
+"""
+
 
 """
 ParsedRFQ.metadata.rfq_number
@@ -29,6 +51,8 @@ from api.schemas import (
     ValidationWarning,
     LineItemResponse,
     RFQItemsResponse,
+    SupplierCandidateResponse,
+    SupplierCandidatesResponse,
 )
 
 from parser.schemas import ParsedRFQ
@@ -166,4 +190,46 @@ def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
     return RFQItemsResponse(
         rfq_number=parsed_rfq.metadata.rfq_number,
         items=item_responses,
+    )
+
+def build_mock_supplier_candidates_response(
+    rfq_number: str
+) -> SupplierCandidatesResponse:
+    """
+    Build mock supplier candidates for a given RFQ number.
+
+    Mock data only for Phase 3 — no SQLite lookup yet. One candidate
+    represents a deterministic historical match (source =
+    historical_sql_match), and one represents a lower-confidence
+    fallback that requires a human to confirm (source =
+    semantic_fallback_candidate). This mirrors the real matching
+    priority described in your project docs: exact/historical match
+    first, semantic fallback only when that's insufficient, and any
+    semantic suggestion requires human review rather than being
+    trusted outright.
+    """
+
+    supplier_candidates = [
+        SupplierCandidateResponse(
+            manufacturer="ABB",
+            supplier_name="Mock ABB Supplier",
+            source="historical_sql_match",
+            stale=False,
+            human_review_required=False,
+            reason="Matched by manufacturer history",
+        ),
+        SupplierCandidateResponse(
+            manufacturer=None,
+            supplier_name="Mock Semantic Candidate",
+            source="semantic_fallback_candidate",
+            stale=None,
+            human_review_required=True,
+            reason="Description-only item requires human review",
+        ),
+    ]
+
+    return SupplierCandidatesResponse(
+        rfq_number=rfq_number,
+        supplier_candidates=supplier_candidates,
+        next_action="review_supplier_candidates",
     )

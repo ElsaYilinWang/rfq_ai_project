@@ -35,3 +35,18 @@ class LineItemResponse(BaseModel):
 class RFQItemsResponse(BaseModel):
     rfq_number: str
     items: List[LineItemResponse]
+
+
+class SupplierCandidateResponse(BaseModel):
+    manufacturer: Optional[str] = None
+    supplier_name: str
+    source: str
+    stale: Optional[bool] = None
+    human_review_required: bool
+    reason: str
+
+
+class SupplierCandidatesResponse(BaseModel):
+    rfq_number: str
+    supplier_candidates: List[SupplierCandidateResponse]
+    next_action: str
