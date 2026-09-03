@@ -73,10 +73,11 @@ This layer is intentionally small. It does not replace the core parser, supplier
 ### What the API Layer Demonstrates
 
 - `GET /health` confirms that the FastAPI service is running.
-- `GET /rfqs/sample` returns a structured sample RFQ parse response.
-- Pydantic models define the external API response contract.
-- A converter maps internal parser dataclasses into API-friendly JSON.
-- The response includes RFQ number, validation status, item count, warnings, next action, and trace ID.
+- `GET /rfqs/sample` returns a structured sample RFQ parse response (status, warnings, next action, trace ID).
+- `GET /rfqs/sample/items` returns line-item-level detail (material number, description, manufacturer, part number, UOM, quantity, flags) for the sample RFQ.
+- `GET /rfqs/sample/supplier-candidates` returns mock supplier candidates, distinguishing deterministic historical matches from lower-confidence semantic-fallback candidates that require human review.
+- Pydantic models define the external API response contract for each endpoint.
+- Converter functions in `api/converters.py` map internal parser dataclasses into API-friendly JSON, so a future swap from mock data to the real SQLite supplier database only changes the converter body, not the routes.
 - CORS middleware is enabled for local frontend-backend development.
 
 ### What the Frontend Demonstrates
@@ -89,6 +90,10 @@ The frontend is a lightweight HTML/CSS/JavaScript review dashboard. It calls the
 - Validation warnings
 - Next recommended action
 - Trace ID for debugging
+- A line-item table with material number, description, manufacturer, part number, UOM, quantity, and flags
+- A supplier candidates table showing source (historical match vs. semantic fallback), staleness, and whether human review is required
+
+Rows that require human review are visually flagged in both tables, so review priority is visible at a glance rather than buried in raw JSON.
 
 This is not a full production frontend. It is a small review interface designed to demonstrate how a web or mobile-style client could consume the RFQ workflow through a REST API.
 
@@ -195,6 +200,21 @@ An end-to-end run can be evaluated by checking whether:
 * An audit trail is saved for later inspection
 
 The evaluation goal is not to claim perfect automation. The goal is to make system behavior measurable, reviewable, and improvable.
+
+### 5. Evaluation Harness (Implemented)
+
+The categories above describe how the system *could* be evaluated at scale. A first, small version of that idea is already implemented in `eval/`:
+
+- `eval/test_cases.json` defines known scenarios — a clean item, an item missing sourcing identifiers, and a semantic-fallback supplier candidate.
+- `eval/run_eval.py` checks each case against the *actual* running API (via FastAPI's `TestClient`, in-process, no server required) rather than hardcoded values, so a real regression in the parser/converter logic causes a real test failure.
+- Running it (`python eval/run_eval.py`) prints a pass/fail summary and writes `eval/eval_report.json`.
+- A GitHub Actions workflow (`.github/workflows/eval.yml`) runs this automatically on every push — see Continuous Integration below.
+
+This is intentionally v1 — three cases, checking the mock `/rfqs/sample*` endpoints rather than the real Excel parser or SQLite supplier database. It establishes the pattern (expected vs. actual, automated, catches regressions) that the broader evaluation categories above can grow into.
+
+---
+
+## Observability and Logging
 
 ---
 
@@ -580,6 +600,10 @@ http://127.0.0.1:8000/rfqs/sample
 
 With the FastAPI server running, open: frontend/index.html
 
+### Run the evaluation harness
+```bash
+python eval/run_eval.py
+
 ### Run tests
 ```bash
 python tests/test_parser.py
@@ -609,6 +633,15 @@ End-to-end workflow tested using realistic RFQ-style scenarios based on hands-on
 
 ---
 
+## Continuous Integration (CI)
+
+The evaluation harness runs automatically through GitHub Actions on every push and pull request (`.github/workflows/eval.yml`). The workflow installs dependencies from `requirements.txt` and runs `python eval/run_eval.py`; the job fails if any evaluation case actually fails, not just if the script crashes.
+
+Docker/containerization is intentionally deferred — the current local development environment doesn't reliably support Docker — so this CI workflow runs directly on GitHub's hosted Python environment instead of a container. This keeps automated checking in place without requiring Docker locally.
+
+
+---
+
 ## What I Learned Building This
 
 **On system design:** Spending time extracting and mapping a real workflow before writing code is not slow — it is the work. The architecture decisions made early (modular design, deterministic-first, human-in-the-loop) held up through all three modules without needing to be revisited.
@@ -619,23 +652,24 @@ End-to-end workflow tested using realistic RFQ-style scenarios based on hands-on
 
 ## Current Limitations
 
-- The FastAPI layer currently exposes a sample RFQ review endpoint, not the full Excel upload workflow.
+- The FastAPI layer currently exposes sample RFQ review, line-item, and supplier-candidate endpoints backed by mock data — not the full Excel upload workflow.
 - The frontend is a lightweight local review dashboard, not a deployed production web application.
-- The API response currently demonstrates parser-to-client response mapping using mock RFQ data.
+- Supplier candidate responses are mock review examples and are not yet connected to the real SQLite supplier knowledge base.
+- The evaluation harness currently checks a small set of known scenarios (3 cases) against the mock endpoints; it will be expanded over time and eventually connected to the real parser and supplier database.
+- Docker/containerization is intentionally deferred because the current local environment doesn't reliably support Docker — CI runs directly on GitHub's hosted Python environment instead.
 - Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
 - The project remains a portfolio/demo system using mock or sanitized data only.
 
 ## Future Improvements
 
-Possible next steps include:
-
+- Connect the supplier candidate endpoint to the real SQLite supplier knowledge base instead of mock data.
 - Add a real `POST /rfqs/parse` endpoint for file upload or controlled mock file-path parsing.
-- Add supplier discovery endpoints such as `GET /rfqs/{rfq_number}/suppliers`.
 - Add draft preview endpoints before Outlook draft creation.
 - Improve warning normalization so duplicate or overlapping validation messages are grouped cleanly.
-- Add API-level tests for FastAPI endpoints and converter behavior.
-- Add a mobile-style client example showing how another client could consume the same JSON contract.
+- Expand the evaluation harness beyond 3 cases, and connect it to the real parser/supplier database rather than only the mock endpoints.
 - Add semantic supplier fallback using embeddings/vector search only after deterministic supplier lookup fails.
+- Add a mobile-style client example showing how another client could consume the same JSON contract.
+- Add Docker/containerization once the local development environment reliably supports it.
 
 ---
 
