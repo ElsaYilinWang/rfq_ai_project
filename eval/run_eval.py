@@ -156,4 +156,8 @@ def run_eval():
 
 
 if __name__ == "__main__":
-    run_eval()
+    report = run_eval()
+    # Exit non-zero when any case fails, so GitHub Actions (and anyone
+    # running this locally) sees a real failure signal — not just a
+    # printed number inside an otherwise "successful" process.
+    sys.exit(0 if report["failed"] == 0 else 1)
