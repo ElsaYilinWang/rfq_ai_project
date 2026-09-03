@@ -1,0 +1,22 @@
+[
+  {
+    "case_id": "clean_abb_item",
+    "description": "Clean item with manufacturer and part number",
+    "material_number": "MAT-001",
+    "expected_status": "parsed_successfully",
+    "expected_next_action": "supplier_discovery_ready"
+  },
+  {
+    "case_id": "missing_sourcing_identifiers",
+    "description": "Item missing manufacturer and part number",
+    "material_number": "MAT-002",
+    "expected_status": "validation_warning",
+    "expected_next_action": "review_required"
+  },
+  {
+    "case_id": "semantic_fallback_candidate",
+    "description": "Description-only item should require human review",
+    "expected_supplier_source": "semantic_fallback_candidate",
+    "expected_human_review_required": true
+  }
+]

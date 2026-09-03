@@ -1,0 +1,22 @@
+{
+  "total_cases": 3,
+  "passed": 3,
+  "failed": 0,
+  "results": [
+    {
+      "case_id": "clean_abb_item",
+      "passed": true,
+      "notes": "Expected status='parsed_successfully', next_action='supplier_discovery_ready'. Actual status='parsed_successfully', next_action='supplier_discovery_ready'."
+    },
+    {
+      "case_id": "missing_sourcing_identifiers",
+      "passed": true,
+      "notes": "Expected status='validation_warning', next_action='review_required'. Actual status='validation_warning', next_action='review_required'."
+    },
+    {
+      "case_id": "semantic_fallback_candidate",
+      "passed": true,
+      "notes": "Found candidate with source='semantic_fallback_candidate', human_review_required=True (expected True)."
+    }
+  ]
+}
