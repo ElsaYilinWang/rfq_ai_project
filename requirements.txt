@@ -2,3 +2,6 @@ anthropic
 python-dotenv
 openpyxl
 sentence-transformers
+fastapi
+uvicorn
+httpx
