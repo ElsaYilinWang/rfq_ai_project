@@ -28,6 +28,11 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 def build_sample_parsed_rfq() -> ParsedRFQ:
     """Builds the mock parsed RFQ shared by all /rfqs/sample* endpoints."""
     return ParsedRFQ(
