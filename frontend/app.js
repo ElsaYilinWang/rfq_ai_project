@@ -55,7 +55,7 @@ function displayItemsTable(items) {
   tableBody.innerHTML = "";
 
   if (!items || items.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="8">No line items found.</td></tr>`;
+    tableBody.innerHTML = `<tr><td colspan="9">No line items found.</td></tr>`;
     return;
   }
 
@@ -75,6 +75,7 @@ function displayItemsTable(items) {
       <td>${item.uom}</td>
       <td>${item.quantity}</td>
       <td>${item.flags && item.flags.length > 0 ? item.flags.join("; ") : "—"}</td>
+      <td class="suggestion-cell">${formatSuggestion(item.suggestion)}</td>
     `;
 
     tableBody.appendChild(row);
@@ -83,7 +84,7 @@ function displayItemsTable(items) {
 
 function displayItemsError(message) {
   const tableBody = document.getElementById("items-table-body");
-  tableBody.innerHTML = `<tr><td colspan="8">Error: ${message}</td></tr>`;
+  tableBody.innerHTML = `<tr><td colspan="9">Error: ${message}</td></tr>`;
 }
 
 async function loadSupplierCandidates() {
@@ -109,6 +110,33 @@ function formatBoolean(value) {
     return "N/A";
   }
   return value ? "Yes" : "No";
+}
+
+// Renders the AI suggestion cell. Deliberately separated from the Flags
+// column: flags come from deterministic parsing, this comes from a model.
+// Keeping them visually distinct means a reviewer always knows which is
+// which — that distinction is the whole point of the review dashboard.
+function formatSuggestion(suggestion) {
+  if (!suggestion) {
+    return "—";
+  }
+
+  const hasIdentification =
+    suggestion.possible_manufacturer || suggestion.possible_part_number;
+
+  const identified = hasIdentification
+    ? `${suggestion.possible_manufacturer ?? "?"} / ${suggestion.possible_part_number ?? "?"}`
+    : "No match identified";
+
+  const reviewNote = suggestion.human_review_required ? " · review required" : "";
+
+  return `
+    <div class="suggestion-value">${identified}</div>
+    <div class="suggestion-meta">
+      <span class="confidence confidence-${suggestion.confidence}">${suggestion.confidence} confidence</span>${reviewNote}
+    </div>
+    <div class="suggestion-reason">${suggestion.reason}</div>
+  `;
 }
 
 function displaySupplierCandidatesTable(candidates) {
