@@ -1,0 +1,224 @@
+{
+  "summaries": [
+    {
+      "analyzer": "mock",
+      "total_cases": 11,
+      "manufacturer_correct": 5,
+      "part_number_correct": 5,
+      "both_fields_correct": 3,
+      "field_accuracy": 0.455,
+      "human_review_required_count": 11
+    },
+    {
+      "analyzer": "claude",
+      "total_cases": 11,
+      "manufacturer_correct": 11,
+      "part_number_correct": 9,
+      "both_fields_correct": 9,
+      "field_accuracy": 0.909,
+      "human_review_required_count": 11
+    }
+  ],
+  "mock_results": [
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Siemens",
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "siemens_motor_no_part_number"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "ABB",
+      "got_part_number": "ACS580",
+      "confidence": "medium",
+      "human_review_required": true,
+      "case_id": "abb_drive_with_model"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": false,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "schneider_contactor"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": true,
+      "got_manufacturer": null,
+      "got_part_number": "MBS3000",
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "danfoss_transmitter"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": false,
+      "got_manufacturer": null,
+      "got_part_number": "DSBC-50",
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "festo_cylinder_written_quantity"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": false,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "fluke_multimeter_model_before_type"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": false,
+      "got_manufacturer": "Siemens",
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "siemens_plc_kit"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": false,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "bearing_no_manufacturer"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": true,
+      "got_manufacturer": null,
+      "got_part_number": "SKF-6205",
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "skf_brand_inside_part_number"
+    },
+    {
+      "manufacturer_correct": false,
+      "part_number_correct": false,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "labelled_fields_john_crane"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "generic_seal_kit_true_negative"
+    }
+  ],
+  "claude_results": [
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Siemens",
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "siemens_motor_no_part_number"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "ABB",
+      "got_part_number": "ACS580",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "abb_drive_with_model"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Schneider",
+      "got_part_number": "LC1D25",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "schneider_contactor"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Danfoss",
+      "got_part_number": "MBS3000",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "danfoss_transmitter"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Festo",
+      "got_part_number": "DSBC-50-200",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "festo_cylinder_written_quantity"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "Fluke",
+      "got_part_number": "87V",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "fluke_multimeter_model_before_type"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": false,
+      "got_manufacturer": "Siemens",
+      "got_part_number": null,
+      "confidence": "medium",
+      "human_review_required": true,
+      "case_id": "siemens_plc_kit"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": null,
+      "got_part_number": "6205-2RS",
+      "confidence": "medium",
+      "human_review_required": true,
+      "case_id": "bearing_no_manufacturer"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": false,
+      "got_manufacturer": "SKF",
+      "got_part_number": "6205",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "skf_brand_inside_part_number"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": "John Crane",
+      "got_part_number": "5610",
+      "confidence": "high",
+      "human_review_required": true,
+      "case_id": "labelled_fields_john_crane"
+    },
+    {
+      "manufacturer_correct": true,
+      "part_number_correct": true,
+      "got_manufacturer": null,
+      "got_part_number": null,
+      "confidence": "low",
+      "human_review_required": true,
+      "case_id": "generic_seal_kit_true_negative"
+    }
+  ]
+}

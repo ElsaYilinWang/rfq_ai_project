@@ -1,0 +1,73 @@
+[
+  {
+    "case_id": "siemens_motor_no_part_number",
+    "description": "Siemens motor 5.5kW quantity 3 delivery 6 weeks",
+    "expected_manufacturer": "Siemens",
+    "expected_part_number": null,
+    "note": "Brand present; 5.5kW is a rating, not a part number."
+  },
+  {
+    "case_id": "abb_drive_with_model",
+    "description": "Please quote ABB drive ACS580 22kW, need 5 units, 4 week lead time",
+    "expected_manufacturer": "ABB",
+    "expected_part_number": "ACS580"
+  },
+  {
+    "case_id": "schneider_contactor",
+    "description": "Need pricing for 10x Schneider contactor LC1D25",
+    "expected_manufacturer": "Schneider",
+    "expected_part_number": "LC1D25"
+  },
+  {
+    "case_id": "danfoss_transmitter",
+    "description": "Request quotation for Danfoss pressure transmitter MBS3000 qty 2 delivery 8 weeks",
+    "expected_manufacturer": "Danfoss",
+    "expected_part_number": "MBS3000"
+  },
+  {
+    "case_id": "festo_cylinder_written_quantity",
+    "description": "Hi, can you send quote for twenty Festo pneumatic cylinders DSBC-50-200",
+    "expected_manufacturer": "Festo",
+    "expected_part_number": "DSBC-50-200"
+  },
+  {
+    "case_id": "fluke_multimeter_model_before_type",
+    "description": "Urgent: need 1 Fluke 87V multimeter ASAP",
+    "expected_manufacturer": "Fluke",
+    "expected_part_number": "87V"
+  },
+  {
+    "case_id": "siemens_plc_kit",
+    "description": "Looking for Siemens S7-1200 PLC starter kit, quantity seven, 3-4 weeks delivery",
+    "expected_manufacturer": "Siemens",
+    "expected_part_number": "S7-1200"
+  },
+  {
+    "case_id": "bearing_no_manufacturer",
+    "description": "Bearing 6205-2RS quantity 15 delivery 2 weeks",
+    "expected_manufacturer": null,
+    "expected_part_number": "6205-2RS",
+    "note": "Part number only. A brand should NOT be inferred from the bearing code."
+  },
+  {
+    "case_id": "skf_brand_inside_part_number",
+    "description": "Hi,\n\nPlease quote below item urgently.\n\nPart number: SKF-6205\nQty: 20\nLead time required: ASAP\n\nThanks",
+    "expected_manufacturer": "SKF",
+    "expected_part_number": "SKF-6205",
+    "note": "Brand is embedded in the part number itself."
+  },
+  {
+    "case_id": "labelled_fields_john_crane",
+    "description": "Item: Pump Seal, MFR: John Crane, Model: 5610, Qty: 5",
+    "expected_manufacturer": "John Crane",
+    "expected_part_number": "5610",
+    "note": "Two-word manufacturer in an explicitly labelled format."
+  },
+  {
+    "case_id": "generic_seal_kit_true_negative",
+    "description": "Seal kit for heat exchanger",
+    "expected_manufacturer": null,
+    "expected_part_number": null,
+    "note": "True negative: nothing identifiable. Guessing here is worse than abstaining."
+  }
+]
