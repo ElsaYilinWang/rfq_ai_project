@@ -44,7 +44,10 @@ no warnings?
 → next_action = supplier_discovery_ready
 """
 
-from typing import List
+from typing import List, Optional, Callable
+
+from parser.schemas import ParsedRFQ
+from llm.schemas import AmbiguousItemAnalysis
 
 from api.schemas import (
     RFQParseResponse,
@@ -55,7 +58,6 @@ from api.schemas import (
     SupplierCandidatesResponse,
 )
 
-from parser.schemas import ParsedRFQ
 
 
 def parsed_rfq_to_api_response(
@@ -143,7 +145,10 @@ def parsed_rfq_to_api_response(
     )
 
 
-def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
+def parsed_rfq_to_items_response(
+    parsed_rfq: ParsedRFQ,
+    analyzer: Optional[Callable[[str], AmbiguousItemAnalysis]] = None,
+) -> RFQItemsResponse:
     """
     Convert the internal parser ParsedRFQ dataclass into a line-item-level
     API response.
@@ -161,6 +166,20 @@ def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
         The API flattens this to a single manufacturer/part_number pair,
         taking the first identifier as "primary." Surfacing alternates
         is a candidate for a later phase.
+    
+        The `analyzer` parameter (Phase 11a):
+        A callable taking a description string and returning an
+        AmbiguousItemAnalysis. It is called ONLY for items where the
+        parser found no sourcing identifiers — i.e. exactly the point
+        where deterministic extraction has already failed and a human
+        would otherwise be left with nothing but the raw description.
+
+        It is optional and defaults to None, which keeps this function
+        pure and instant. That matters once the analyzer is backed by a
+        real LLM call: API contract tests and the eval harness can pass
+        None and stay fast and free, while the live route passes the
+        real one. Deterministic-first is preserved — the analyzer never
+        overrides parser output, it only fills a gap the parser left.
     """
 
     item_responses: List[LineItemResponse] = []
@@ -169,6 +188,9 @@ def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
         primary_identifier = (
             item.sourcing_identifiers[0] if item.sourcing_identifiers else None
         )
+        suggestion: Optional[AmbiguousItemAnalysis] = None
+        if analyzer is not None and primary_identifier is None:
+            suggestion = analyzer(item.long_description)
 
         item_responses.append(
             LineItemResponse(
@@ -184,6 +206,7 @@ def parsed_rfq_to_items_response(parsed_rfq: ParsedRFQ) -> RFQItemsResponse:
                 uom=item.uom,
                 quantity=item.quantity,
                 flags=item.flags,
+                suggestion=suggestion,
             )
         )
 

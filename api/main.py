@@ -17,6 +17,8 @@ from api.converters import (
 )
 from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
 
+from llm.claude_analyzer import get_analyzer
+
 app = FastAPI(title="RFQ AI Review API")
 
 app.add_middleware(
@@ -85,8 +87,17 @@ def get_sample_rfq():
 def get_sample_rfq_items():
     """
     Return line-item-level detail for the sample RFQ.
+
+    Items where the parser found no manufacturer or part number are
+    passed to the analyzer, which attaches a `suggestion` for the
+    reviewer. get_analyzer() returns the real Claude-backed analyzer
+    when ANTHROPIC_API_KEY is configured and the deterministic mock
+    otherwise, so this route works with or without a key.
     """
-    return parsed_rfq_to_items_response(build_sample_parsed_rfq())
+    return parsed_rfq_to_items_response(
+        build_sample_parsed_rfq(),
+        analyzer=get_analyzer(),
+    )
 
 @app.get(
     "/rfqs/sample/supplier-candidates",

@@ -1,7 +1,6 @@
 # api/schemas.py
 
-# api/schemas.py
-
+from llm.schemas import AmbiguousItemAnalysis
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -30,7 +29,17 @@ class LineItemResponse(BaseModel):
     uom: str
     quantity: int
     flags: List[str] = []
-
+    # Populated only when the parser found no sourcing identifiers AND
+    # an analyzer was supplied. Always null otherwise, so existing
+    # clients that ignore this field keep working unchanged.
+    #
+    # Note: this nests llm.schemas.AmbiguousItemAnalysis directly rather
+    # than defining a separate API-side copy. The dataclass-to-Pydantic
+    # converter pattern used elsewhere exists because the parser's
+    # internal dataclasses aren't serializable API contracts.
+    # AmbiguousItemAnalysis already is one, so duplicating it would add
+    # a mapping layer with nothing to map.
+    suggestion: Optional[AmbiguousItemAnalysis] = None
 
 class RFQItemsResponse(BaseModel):
     rfq_number: str
