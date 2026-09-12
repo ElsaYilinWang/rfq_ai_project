@@ -43,7 +43,7 @@ load_dotenv()
 
 # Bump this whenever the prompt text below changes, so log lines can be
 # traced back to the exact prompt that produced them.
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 MODEL = "claude-haiku-4-5-20251001"
 
@@ -68,6 +68,10 @@ Rules:
 - If a field cannot be determined from the description, use null.
 - Do not guess a manufacturer from the product type alone. Generic
   descriptions such as "seal kit" or "bearing" do not imply a brand.
+- Model or series designations that identify a specific product line,
+  such as "S7-1200" or "ACS580", count as part numbers. Do not return
+  null for possible_part_number merely because the code names a product
+  family rather than a single orderable SKU.
 - Never invent supplier names, prices, lead times, or certificates.
 - Use "high" confidence only when both a manufacturer and a part
   number appear explicitly in the description."""

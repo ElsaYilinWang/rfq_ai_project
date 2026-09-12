@@ -4,18 +4,18 @@
       "analyzer": "mock",
       "total_cases": 11,
       "manufacturer_correct": 5,
-      "part_number_correct": 5,
+      "part_number_correct": 4,
       "both_fields_correct": 3,
-      "field_accuracy": 0.455,
+      "field_accuracy": 0.409,
       "human_review_required_count": 11
     },
     {
       "analyzer": "claude",
       "total_cases": 11,
       "manufacturer_correct": 11,
-      "part_number_correct": 9,
-      "both_fields_correct": 9,
-      "field_accuracy": 0.909,
+      "part_number_correct": 11,
+      "both_fields_correct": 11,
+      "field_accuracy": 1.0,
       "human_review_required_count": 11
     }
   ],
@@ -94,7 +94,7 @@
     },
     {
       "manufacturer_correct": false,
-      "part_number_correct": true,
+      "part_number_correct": false,
       "got_manufacturer": null,
       "got_part_number": "SKF-6205",
       "confidence": "low",
@@ -177,10 +177,10 @@
     },
     {
       "manufacturer_correct": true,
-      "part_number_correct": false,
+      "part_number_correct": true,
       "got_manufacturer": "Siemens",
-      "got_part_number": null,
-      "confidence": "medium",
+      "got_part_number": "S7-1200",
+      "confidence": "high",
       "human_review_required": true,
       "case_id": "siemens_plc_kit"
     },
@@ -195,7 +195,7 @@
     },
     {
       "manufacturer_correct": true,
-      "part_number_correct": false,
+      "part_number_correct": true,
       "got_manufacturer": "SKF",
       "got_part_number": "6205",
       "confidence": "high",

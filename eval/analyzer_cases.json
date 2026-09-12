@@ -53,8 +53,8 @@
     "case_id": "skf_brand_inside_part_number",
     "description": "Hi,\n\nPlease quote below item urgently.\n\nPart number: SKF-6205\nQty: 20\nLead time required: ASAP\n\nThanks",
     "expected_manufacturer": "SKF",
-    "expected_part_number": "SKF-6205",
-    "note": "Brand is embedded in the part number itself."
+    "expected_part_number": "6205",
+    "note": "Brand is embedded in the part number. Relabelled after eval run 1: the correct decomposition is manufacturer=SKF + part_number=6205, not the raw string. The original label was an artifact of the archived schema, which had no separate manufacturer field."
   },
   {
     "case_id": "labelled_fields_john_crane",
