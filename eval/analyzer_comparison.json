@@ -7,7 +7,10 @@
       "part_number_correct": 4,
       "both_fields_correct": 3,
       "field_accuracy": 0.409,
-      "human_review_required_count": 11
+      "human_review_required_count": 11,
+      "total_cost_usd": 0.0,
+      "median_latency_seconds": 0.0,
+      "max_latency_seconds": 0.0
     },
     {
       "analyzer": "claude",
@@ -16,7 +19,10 @@
       "part_number_correct": 11,
       "both_fields_correct": 11,
       "field_accuracy": 1.0,
-      "human_review_required_count": 11
+      "human_review_required_count": 11,
+      "total_cost_usd": 0.00814,
+      "median_latency_seconds": 1.929,
+      "max_latency_seconds": 2.541
     }
   ],
   "mock_results": [
@@ -27,7 +33,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "siemens_motor_no_part_number"
+      "case_id": "siemens_motor_no_part_number",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": true,
@@ -36,7 +44,9 @@
       "got_part_number": "ACS580",
       "confidence": "medium",
       "human_review_required": true,
-      "case_id": "abb_drive_with_model"
+      "case_id": "abb_drive_with_model",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -45,7 +55,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "schneider_contactor"
+      "case_id": "schneider_contactor",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -54,7 +66,9 @@
       "got_part_number": "MBS3000",
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "danfoss_transmitter"
+      "case_id": "danfoss_transmitter",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -63,7 +77,9 @@
       "got_part_number": "DSBC-50",
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "festo_cylinder_written_quantity"
+      "case_id": "festo_cylinder_written_quantity",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -72,7 +88,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "fluke_multimeter_model_before_type"
+      "case_id": "fluke_multimeter_model_before_type",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": true,
@@ -81,7 +99,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "siemens_plc_kit"
+      "case_id": "siemens_plc_kit",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": true,
@@ -90,7 +110,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "bearing_no_manufacturer"
+      "case_id": "bearing_no_manufacturer",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -99,7 +121,9 @@
       "got_part_number": "SKF-6205",
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "skf_brand_inside_part_number"
+      "case_id": "skf_brand_inside_part_number",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": false,
@@ -108,7 +132,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "labelled_fields_john_crane"
+      "case_id": "labelled_fields_john_crane",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     },
     {
       "manufacturer_correct": true,
@@ -117,7 +143,9 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "generic_seal_kit_true_negative"
+      "case_id": "generic_seal_kit_true_negative",
+      "latency_seconds": 0.0,
+      "cost_usd": 0.0
     }
   ],
   "claude_results": [
@@ -128,7 +156,12 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "siemens_motor_no_part_number"
+      "case_id": "siemens_motor_no_part_number",
+      "latency_seconds": 2.541,
+      "input_tokens": 338,
+      "output_tokens": 74,
+      "cost_usd": 0.000708,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -137,7 +170,12 @@
       "got_part_number": "ACS580",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "abb_drive_with_model"
+      "case_id": "abb_drive_with_model",
+      "latency_seconds": 1.745,
+      "input_tokens": 343,
+      "output_tokens": 75,
+      "cost_usd": 0.000718,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -146,7 +184,12 @@
       "got_part_number": "LC1D25",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "schneider_contactor"
+      "case_id": "schneider_contactor",
+      "latency_seconds": 1.778,
+      "input_tokens": 333,
+      "output_tokens": 81,
+      "cost_usd": 0.000738,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -155,7 +198,12 @@
       "got_part_number": "MBS3000",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "danfoss_transmitter"
+      "case_id": "danfoss_transmitter",
+      "latency_seconds": 1.952,
+      "input_tokens": 343,
+      "output_tokens": 82,
+      "cost_usd": 0.000753,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -164,7 +212,12 @@
       "got_part_number": "DSBC-50-200",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "festo_cylinder_written_quantity"
+      "case_id": "festo_cylinder_written_quantity",
+      "latency_seconds": 1.627,
+      "input_tokens": 340,
+      "output_tokens": 86,
+      "cost_usd": 0.00077,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -173,7 +226,12 @@
       "got_part_number": "87V",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "fluke_multimeter_model_before_type"
+      "case_id": "fluke_multimeter_model_before_type",
+      "latency_seconds": 1.715,
+      "input_tokens": 336,
+      "output_tokens": 77,
+      "cost_usd": 0.000721,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -182,7 +240,12 @@
       "got_part_number": "S7-1200",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "siemens_plc_kit"
+      "case_id": "siemens_plc_kit",
+      "latency_seconds": 1.976,
+      "input_tokens": 345,
+      "output_tokens": 83,
+      "cost_usd": 0.00076,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -191,7 +254,12 @@
       "got_part_number": "6205-2RS",
       "confidence": "medium",
       "human_review_required": true,
-      "case_id": "bearing_no_manufacturer"
+      "case_id": "bearing_no_manufacturer",
+      "latency_seconds": 2.093,
+      "input_tokens": 335,
+      "output_tokens": 87,
+      "cost_usd": 0.00077,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -200,7 +268,12 @@
       "got_part_number": "6205",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "skf_brand_inside_part_number"
+      "case_id": "skf_brand_inside_part_number",
+      "latency_seconds": 1.929,
+      "input_tokens": 353,
+      "output_tokens": 89,
+      "cost_usd": 0.000798,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -209,7 +282,12 @@
       "got_part_number": "5610",
       "confidence": "high",
       "human_review_required": true,
-      "case_id": "labelled_fields_john_crane"
+      "case_id": "labelled_fields_john_crane",
+      "latency_seconds": 1.939,
+      "input_tokens": 344,
+      "output_tokens": 77,
+      "cost_usd": 0.000729,
+      "outcome": "success"
     },
     {
       "manufacturer_correct": true,
@@ -218,7 +296,12 @@
       "got_part_number": null,
       "confidence": "low",
       "human_review_required": true,
-      "case_id": "generic_seal_kit_true_negative"
+      "case_id": "generic_seal_kit_true_negative",
+      "latency_seconds": 1.833,
+      "input_tokens": 325,
+      "output_tokens": 70,
+      "cost_usd": 0.000675,
+      "outcome": "success"
     }
   ]
 }

@@ -21,3 +21,17 @@ class AmbiguousItemAnalysis(BaseModel):
     confidence: Literal["low", "medium", "high"]
     reason: str
     human_review_required: bool
+
+class CallMetrics(BaseModel):
+    """
+    Per-call measurement for one model invocation. Captured by the
+    provider adapter, consumed by evaluation/reporting — never by the
+    workflow itself, which only sees the AmbiguousItemAnalysis.
+    """
+    model: str
+    prompt_version: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
+    latency_seconds: float
+    outcome: str  # "success" | "call_failed" | "invalid_json" | "schema_invalid"
