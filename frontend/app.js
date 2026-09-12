@@ -44,6 +44,7 @@ async function loadSampleRFQItems() {
 
     const data = await response.json();
     displayItemsTable(data.items);
+    document.getElementById("items-trace-id").textContent = data.trace_id ?? "—";
   } catch (error) {
     console.error("Failed to load RFQ items:", error);
     displayItemsError(error.message);

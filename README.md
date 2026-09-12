@@ -216,10 +216,6 @@ This is intentionally v1 — three cases, checking the mock `/rfqs/sample*` endp
 
 ## Observability and Logging
 
----
-
-## Observability and Logging
-
 The project uses logging and JSON outputs to make workflow behavior inspectable. In a production enterprise workflow, observability is important because silent failures can create operational risk.
 
 For each workflow run, the system should ideally record:
@@ -251,6 +247,20 @@ Example log events:
 * Audit trail saved
 
 This makes the system easier to debug and safer to operate. Instead of only seeing the final draft, the user can understand what happened at each step.
+
+### Tracing a suggestion to its model call
+
+Every `/rfqs/sample/items` request generates a `trace_id`, shown in
+the API response and under the dashboard's line-items table. Each
+model call made while building that response logs one structured line
+to `llm_calls.log` carrying the same id — with prompt version, token
+counts, cost, latency, and outcome:
+
+    grep "items_45a4faeaf6bb" llm_calls.log
+
+No external observability platform is used; the log format is designed
+so a Langfuse-style tool could be added later without changing the
+instrumentation points.
 
 ---
 

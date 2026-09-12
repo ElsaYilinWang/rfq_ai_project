@@ -127,3 +127,9 @@ code {
   margin-top: 4px;
   font-style: italic;
 }
+
+.trace-note {
+  font-size: 12px;
+  color: #888;
+  margin-top: 8px;
+}

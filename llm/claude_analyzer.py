@@ -22,10 +22,10 @@ parsed_rfq_to_items_response. That interchangeability is the point:
 the rest of the workflow never knows which one it got.
 """
 
-
 import logging
 import os
 import time
+from functools import partial
 
 from anthropic import Anthropic
 from dotenv import load_dotenv
@@ -45,15 +45,19 @@ MODEL = "claude-haiku-4-5-20251001"
 INPUT_COST_PER_TOKEN = 1.00 / 1_000_000
 OUTPUT_COST_PER_TOKEN = 5.00 / 1_000_000
 
-def analyze_with_metrics(description: str) -> tuple[AmbiguousItemAnalysis, CallMetrics]:
+
+def analyze_with_metrics(
+    description: str,
+    trace_id: str | None = None,
+) -> tuple[AmbiguousItemAnalysis, CallMetrics]:
     """
     Same analysis as analyze_ambiguous_item_with_claude, but also
     returns per-call metrics: tokens, cost, latency, and which outcome
     path fired. Used by evaluation and comparison tooling.
     """
     logger.info(
-        "Analyzing ambiguous item | prompt_version=%s model=%s input_length=%d",
-        PROMPT_VERSION, MODEL, len(description),
+        "Analyzing ambiguous item | trace_id=%s prompt_version=%s model=%s input_length=%d",
+        trace_id, PROMPT_VERSION, MODEL, len(description),
     )
 
     started = time.perf_counter()
@@ -71,7 +75,8 @@ def analyze_with_metrics(description: str) -> tuple[AmbiguousItemAnalysis, CallM
     except Exception as exc:
         latency = time.perf_counter() - started
         logger.error(
-            "Model call failed | prompt_version=%s error=%s", PROMPT_VERSION, exc
+            "Model call failed | trace_id=%s prompt_version=%s error=%s",
+            trace_id, PROMPT_VERSION, exc,
         )
         return (
             fallback("Analysis unavailable: the model call failed."),
@@ -109,31 +114,40 @@ def analyze_with_metrics(description: str) -> tuple[AmbiguousItemAnalysis, CallM
         outcome=outcome,
     )
 
+    # The one-line-per-call completion record: everything needed to
+    # trace a suggestion in the UI back to the exact model call.
     logger.info(
-        "Call metrics | outcome=%s tokens_in=%d tokens_out=%d cost_usd=%.6f latency=%.2fs",
-        outcome, input_tokens, output_tokens, metrics.cost_usd, latency,
+        "Call metrics | trace_id=%s outcome=%s prompt_version=%s model=%s "
+        "tokens_in=%d tokens_out=%d cost_usd=%.6f latency=%.2fs",
+        trace_id, outcome, PROMPT_VERSION, MODEL,
+        input_tokens, output_tokens, metrics.cost_usd, latency,
     )
 
     return analysis, metrics
 
 
-def analyze_ambiguous_item_with_claude(description: str) -> AmbiguousItemAnalysis:
+def analyze_ambiguous_item_with_claude(
+    description: str,
+    trace_id: str | None = None,
+) -> AmbiguousItemAnalysis:
     """Signature-compatible wrapper: analysis only, metrics discarded."""
-    analysis, _ = analyze_with_metrics(description)
+    analysis, _ = analyze_with_metrics(description, trace_id=trace_id)
     return analysis
 
 
-def get_analyzer():
+def get_analyzer(trace_id: str | None = None):
     """
     Returns the real Claude analyzer when an API key is configured,
     otherwise the deterministic mock.
 
-    This is what lets the same route work locally with a key, in CI
-    without one, and in tests without either — no branching at the
-    call site.
+    When a trace_id is given, it is bound into the returned callable
+    here (functools.partial) so the converter's analyzer(description)
+    contract stays unchanged — the converter never learns tracing
+    exists. The mock is never bound: it makes no external call, so
+    there is nothing to trace.
     """
     if os.getenv("ANTHROPIC_API_KEY"):
-        return analyze_ambiguous_item_with_claude
+        return partial(analyze_ambiguous_item_with_claude, trace_id=trace_id)
 
     from llm.ambiguous_item_analyzer import analyze_ambiguous_item
     logger.info("No ANTHROPIC_API_KEY found — falling back to the mock analyzer.")

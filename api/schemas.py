@@ -44,6 +44,9 @@ class LineItemResponse(BaseModel):
 class RFQItemsResponse(BaseModel):
     rfq_number: str
     items: List[LineItemResponse]
+    # Per-request trace id: every model call made while building this
+    # response logs the same id, so one grep finds them all.
+    trace_id: Optional[str] = None
 
 
 class SupplierCandidateResponse(BaseModel):

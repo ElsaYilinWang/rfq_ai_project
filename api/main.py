@@ -1,5 +1,6 @@
 # api/main.py
-
+import logging
+import uuid
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +19,19 @@ from api.converters import (
 from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
 
 from llm.claude_analyzer import get_analyzer
+
+# All llm.* loggers write one structured line per model call to
+# llm_calls.log (in addition to the console). This is the greppable
+# record that lets a trace_id shown in the dashboard be followed to
+# the exact model call, its tokens, cost, latency, and outcome.
+_llm_logger = logging.getLogger("llm")
+_llm_logger.setLevel(logging.INFO)
+if not _llm_logger.handlers:
+    _handler = logging.FileHandler("llm_calls.log")
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    _llm_logger.addHandler(_handler)
 
 app = FastAPI(title="RFQ AI Review API")
 
@@ -94,9 +108,11 @@ def get_sample_rfq_items():
     when ANTHROPIC_API_KEY is configured and the deterministic mock
     otherwise, so this route works with or without a key.
     """
+    trace_id = f"items_{uuid.uuid4().hex[:12]}"
     return parsed_rfq_to_items_response(
         build_sample_parsed_rfq(),
-        analyzer=get_analyzer(),
+        analyzer=get_analyzer(trace_id=trace_id),
+        trace_id=trace_id,
     )
 
 @app.get(

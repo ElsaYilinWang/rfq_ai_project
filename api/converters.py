@@ -148,6 +148,7 @@ def parsed_rfq_to_api_response(
 def parsed_rfq_to_items_response(
     parsed_rfq: ParsedRFQ,
     analyzer: Optional[Callable[[str], AmbiguousItemAnalysis]] = None,
+    trace_id: Optional[str] = None,
 ) -> RFQItemsResponse:
     """
     Convert the internal parser ParsedRFQ dataclass into a line-item-level
@@ -213,6 +214,7 @@ def parsed_rfq_to_items_response(
     return RFQItemsResponse(
         rfq_number=parsed_rfq.metadata.rfq_number,
         items=item_responses,
+        trace_id=trace_id,
     )
 
 def build_mock_supplier_candidates_response(

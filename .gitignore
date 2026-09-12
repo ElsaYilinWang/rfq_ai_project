@@ -35,6 +35,7 @@ mock_data/*.xlsx
 
 # Log files
 logs/
+llm_calls.log
 
 # Knowledge base files
 knowledge_base/

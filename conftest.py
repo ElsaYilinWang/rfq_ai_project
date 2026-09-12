@@ -15,3 +15,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _no_real_api_key(monkeypatch):
+    """
+    Force the mock analyzer path in every test by removing the API key
+    from the environment for the test's duration. Without this, the
+    items-endpoint tests make real (paid, slow, non-deterministic)
+    Claude calls whenever a developer has a key in .env — which the
+    llm_calls.log trace lines revealed was actually happening.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
