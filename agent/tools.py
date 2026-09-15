@@ -54,7 +54,7 @@ established; connecting to the real database is future work.
 from datetime import date
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -123,6 +123,8 @@ def _supplier_to_dict(supplier: Supplier) -> dict:
 # ---------------------------------------------------------------------
 
 class SearchSuppliersInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     manufacturer: str = Field(
         description="Manufacturer or brand name to search for, e.g. 'ABB'."
     )
@@ -147,6 +149,8 @@ def search_suppliers_by_manufacturer(args: SearchSuppliersInput) -> dict:
 # ---------------------------------------------------------------------
 
 class CheckStaleSuppliersInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     cutoff_date: str = Field(
         description=(
             "ISO 8601 date (YYYY-MM-DD). Suppliers last contacted before "
@@ -184,6 +188,8 @@ def check_stale_suppliers(args: CheckStaleSuppliersInput) -> dict:
 # ---------------------------------------------------------------------
 
 class AnalyzeItemDescriptionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     description: str = Field(
         description="The raw RFQ line item description to analyze."
     )
@@ -200,6 +206,8 @@ def analyze_item_description(args: AnalyzeItemDescriptionInput) -> dict:
 # ---------------------------------------------------------------------
 
 class DraftSupplierEmailInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     supplier_name: str = Field(description="Name of the supplier to draft to.")
     supplier_email: str = Field(description="Supplier's email address.")
     material_number: str = Field(description="Internal material number.")
