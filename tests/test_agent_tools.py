@@ -49,6 +49,24 @@ def test_check_stale_suppliers_finds_the_one_old_record():
     )
     assert result["stale_count"] == 1
     assert result["stale_suppliers"][0]["supplier_name"] == "Mock Siemens Supplier"
+    assert result["cutoff_source"] == "provided_by_caller"
+
+
+def test_check_stale_suppliers_default_uses_real_12_month_rule_not_a_guess():
+    """
+    Regression test for a real issue found in a live agent run: with
+    no default, the model invented a plausible-looking but arbitrary
+    cutoff date with no actual policy behind it. cutoff_date is now
+    optional, and omitting it must apply the project's real 12-month
+    staleness rule (computed in code) rather than leaving the model to
+    reconstruct a business rule it was never given.
+    """
+    result = check_stale_suppliers(CheckStaleSuppliersInput())
+    assert result["cutoff_source"] == "default_12_month_rule"
+    # The old Siemens record (2023) must still be caught by the
+    # computed default, same as an explicit cutoff would catch it.
+    assert result["stale_count"] == 1
+    assert result["stale_suppliers"][0]["supplier_name"] == "Mock Siemens Supplier"
 
 
 def test_check_stale_suppliers_malformed_date_fails_safely():
@@ -107,6 +125,34 @@ def test_draft_supplier_email_handles_missing_identification():
     )
     assert result["status"] == "draft_only_not_sent"
     assert "to be confirmed" in result["body"]
+
+
+def test_draft_supplier_email_uses_partial_identification_when_available():
+    """
+    Regression test for a real bug found in a live agent run: a known
+    manufacturer with no known part number was being discarded
+    entirely (showing "to be confirmed" instead of "ABB"), because the
+    original logic only used the identification fields if BOTH were
+    present. A manufacturer the agent actually identified must appear
+    in the draft even when the part number is still unknown.
+    """
+    result = draft_supplier_email(
+        DraftSupplierEmailInput(
+            supplier_name="Mock ABB Supplier",
+            supplier_email="mock.abb.supplier@example.com",
+            material_number="MAT-001",
+            item_description="ABB circuit breaker 10A",
+            quantity=1,
+            uom="EA",
+            manufacturer="ABB",
+            # part_number deliberately omitted
+        )
+    )
+    identification_line = next(
+        line for line in result["body"].splitlines() if "Identification" in line
+    )
+    assert "ABB" in identification_line
+    assert "to be confirmed" not in identification_line
 
 
 def test_registry_has_no_send_email_tool():

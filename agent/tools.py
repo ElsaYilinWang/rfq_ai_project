@@ -51,7 +51,7 @@ the same "separate, parallel demonstration layer" boundary Phase 9
 established; connecting to the real database is future work.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -123,6 +123,8 @@ def _supplier_to_dict(supplier: Supplier) -> dict:
 # ---------------------------------------------------------------------
 
 class SearchSuppliersInput(BaseModel):
+    # extra="forbid" makes Pydantic emit additionalProperties: false,
+    # which Anthropic's strict:true tool-use mode requires.
     model_config = ConfigDict(extra="forbid")
 
     manufacturer: str = Field(
@@ -149,33 +151,56 @@ def search_suppliers_by_manufacturer(args: SearchSuppliersInput) -> dict:
 # ---------------------------------------------------------------------
 
 class CheckStaleSuppliersInput(BaseModel):
+    # extra="forbid" makes Pydantic emit additionalProperties: false,
+    # which Anthropic's strict:true tool-use mode requires.
     model_config = ConfigDict(extra="forbid")
 
-    cutoff_date: str = Field(
+    cutoff_date: Optional[str] = Field(
+        default=None,
         description=(
             "ISO 8601 date (YYYY-MM-DD). Suppliers last contacted before "
-            "this date are considered stale."
-        )
+            "this date are considered stale. Leave unset to use the "
+            "project's standard 12-month staleness rule — do not invent "
+            "or calculate a cutoff date yourself."
+        ),
     )
 
 
+# Approximates Module 2's "12 months since last contact" staleness
+# rule as a fixed day count. Not calendar-month-exact (doesn't account
+# for month lengths), which is an acceptable approximation for this
+# mock layer but worth knowing if it's ever ported to the real
+# knowledge base.
+DEFAULT_STALENESS_WINDOW_DAYS = 365
+
+
 def check_stale_suppliers(args: CheckStaleSuppliersInput) -> dict:
-    try:
-        parsed_cutoff = date.fromisoformat(args.cutoff_date)
-    except ValueError:
-        return {
-            "error": (
-                f"'{args.cutoff_date}' is not a valid ISO date "
-                "(expected YYYY-MM-DD)."
-            )
-        }
+    if args.cutoff_date is None:
+        # The real business rule, computed in code — not left for the
+        # model to reconstruct. A live run before this fix showed the
+        # model picking a plausible-looking but arbitrary date with no
+        # actual policy behind it.
+        parsed_cutoff = date.today() - timedelta(days=DEFAULT_STALENESS_WINDOW_DAYS)
+        cutoff_source = "default_12_month_rule"
+    else:
+        try:
+            parsed_cutoff = date.fromisoformat(args.cutoff_date)
+        except ValueError:
+            return {
+                "error": (
+                    f"'{args.cutoff_date}' is not a valid ISO date "
+                    "(expected YYYY-MM-DD)."
+                )
+            }
+        cutoff_source = "provided_by_caller"
 
     session = _SessionLocal()
     try:
         repository = SupplierRepository(session)
         suppliers = repository.find_stale_suppliers(parsed_cutoff)
         return {
-            "cutoff_date": args.cutoff_date,
+            "cutoff_date": parsed_cutoff.isoformat(),
+            "cutoff_source": cutoff_source,
             "stale_count": len(suppliers),
             "stale_suppliers": [_supplier_to_dict(s) for s in suppliers],
         }
@@ -188,6 +213,8 @@ def check_stale_suppliers(args: CheckStaleSuppliersInput) -> dict:
 # ---------------------------------------------------------------------
 
 class AnalyzeItemDescriptionInput(BaseModel):
+    # extra="forbid" makes Pydantic emit additionalProperties: false,
+    # which Anthropic's strict:true tool-use mode requires.
     model_config = ConfigDict(extra="forbid")
 
     description: str = Field(
@@ -206,6 +233,8 @@ def analyze_item_description(args: AnalyzeItemDescriptionInput) -> dict:
 # ---------------------------------------------------------------------
 
 class DraftSupplierEmailInput(BaseModel):
+    # extra="forbid" makes Pydantic emit additionalProperties: false,
+    # which Anthropic's strict:true tool-use mode requires.
     model_config = ConfigDict(extra="forbid")
 
     supplier_name: str = Field(description="Name of the supplier to draft to.")
@@ -231,10 +260,13 @@ def draft_supplier_email(args: DraftSupplierEmailInput) -> dict:
     here that could invent a detail.
     """
 
+    # Was all-or-nothing (both fields or neither) — fixed after a live
+    # run showed a known manufacturer with no part number got dropped
+    # from the email entirely, discarding real information the agent
+    # had actually gathered.
+    known_parts = [p for p in (args.manufacturer, args.part_number) if p]
     identification = (
-        f"{args.manufacturer} {args.part_number}"
-        if args.manufacturer and args.part_number
-        else "manufacturer/part number to be confirmed"
+        " ".join(known_parts) if known_parts else "manufacturer/part number to be confirmed"
     )
 
     subject = f"RFQ — {args.material_number} — {args.quantity}x {args.uom}"
@@ -282,8 +314,10 @@ TOOL_REGISTRY = {
         "input_model": CheckStaleSuppliersInput,
         "function": check_stale_suppliers,
         "description": (
-            "Check which suppliers have not been contacted since a given "
-            "cutoff date. Read-only."
+            "Check which suppliers have not been contacted since a "
+            "cutoff date. Read-only. Omit cutoff_date to use the "
+            "project's standard 12-month staleness rule — do not "
+            "calculate or invent a cutoff date yourself."
         ),
     },
     "analyze_item_description": {
