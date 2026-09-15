@@ -26,6 +26,10 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
 - API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
 - Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
+- Automated testing with pytest (39 tests), an evaluation harness, and CI on every push
+- A lightweight SQLAlchemy repository layer over a supplier database
+- A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
+- A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
 
 ## What Is This?
 
@@ -74,8 +78,9 @@ This layer is intentionally small. It does not replace the core parser, supplier
 
 - `GET /health` confirms that the FastAPI service is running.
 - `GET /rfqs/sample` returns a structured sample RFQ parse response (status, warnings, next action, trace ID).
-- `GET /rfqs/sample/items` returns line-item-level detail (material number, description, manufacturer, part number, UOM, quantity, flags) for the sample RFQ.
+- `GET /rfqs/sample/items` returns line-item-level detail (material number, description, manufacturer, part number, UOM, quantity, flags) for the sample RFQ. Items with no manufacturer or part number also carry a `suggestion` field — the output of the LLM analyzer described below.
 - `GET /rfqs/sample/supplier-candidates` returns mock supplier candidates, distinguishing deterministic historical matches from lower-confidence semantic-fallback candidates that require human review.
+- `GET /rfqs/sample/items/{line_item}/agent-search` runs the multi-step agent (see below) for one line item. Unlike every other endpoint here, this one makes real, paid API calls — not mock data.
 - Pydantic models define the external API response contract for each endpoint.
 - Converter functions in `api/converters.py` map internal parser dataclasses into API-friendly JSON, so a future swap from mock data to the real SQLite supplier database only changes the converter body, not the routes.
 - CORS middleware is enabled for local frontend-backend development.
@@ -96,6 +101,68 @@ The frontend is a lightweight HTML/CSS/JavaScript review dashboard. It calls the
 Rows that require human review are visually flagged in both tables, so review priority is visible at a glance rather than buried in raw JSON.
 
 This is not a full production frontend. It is a small review interface designed to demonstrate how a web or mobile-style client could consume the RFQ workflow through a REST API.
+
+---
+
+## AI-Assisted Item Analysis and Supplier-Search Agent
+
+Everything above is deterministic. This section is where real LLM calls actually happen — and it's built in the same deterministic-first spirit: AI is introduced only at the exact point deterministic parsing has already failed, and every AI-derived result is unconditionally marked as requiring human review, regardless of confidence or completion.
+
+### Structured item analysis
+
+When the parser finds no manufacturer or part number for a line item, that description is passed to an analyzer that returns a validated structured result — never free text:
+
+```json
+{
+  "possible_manufacturer": null,
+  "possible_part_number": null,
+  "confidence": "low",
+  "reason": "The description is generic with no identifiable manufacturer, brand name, or part number specified.",
+  "human_review_required": true
+}
+```
+
+`confidence` is constrained to exactly `"low"`, `"medium"`, or `"high"` via a Pydantic `Literal` type — an invalid value is rejected, not silently accepted. `human_review_required` is forced to `true` after parsing regardless of what the model returns; a test (`test_model_cannot_disable_human_review`) proves the model cannot override this even when it explicitly tries to.
+
+Two implementations share this contract and are interchangeable at the call site:
+- **Mock** (`llm/ambiguous_item_analyzer.py`) — a hardcoded manufacturer list plus a part-number-shaped regex. No API calls, no cost.
+- **Real** (`llm/claude_analyzer.py`, Claude Haiku 4.5) — an actual model call, validated against the same schema, with a safe fallback on any failure (network error, malformed JSON, schema violation). `get_analyzer()` returns whichever is available — the real analyzer when `ANTHROPIC_API_KEY` is set, the mock otherwise — so the same code path works locally, in CI, and in tests without branching anywhere else.
+
+The prompt/validation logic lives in a provider-neutral core (`llm/analysis_core.py`) with zero import of the Anthropic SDK; `llm/claude_analyzer.py` is a thin adapter over it. Swapping providers means writing a new adapter against that core, not touching the prompt or validation logic.
+
+**Measured, not assumed:** `eval/compare_analyzers.py` runs both analyzers against 11 hand-labelled cases (`eval/analyzer_cases.json`) covering clean extractions, partial matches, a brand name embedded in a part number, and a deliberate true negative (a generic description where the correct answer is "nothing identifiable"). Latest run:
+
+```
+                          mock    claude
+field accuracy             41%      100%
+total cost               $0.0000   $0.0081
+median latency               0ms     1.93s
+```
+
+This is not run in CI — it makes real, paid API calls. Run it by hand with `python eval/compare_analyzers.py`. The 100% figure was reached after two real fixes to a real disagreement — a mislabelled case and a prompt gap around product-line designations like "S7-1200" — both recorded in the case notes and the prompt version history, not silently smoothed over.
+
+### The supplier-search agent
+
+`agent/supplier_agent.py` is a genuinely multi-step, tool-calling agent (Claude Sonnet 5) — the project's only component where the model decides what to do next based on an intermediate result, rather than producing one structured answer from one input.
+
+Given one RFQ line item, it can: search the supplier database by manufacturer, check which suppliers haven't been contacted recently, call the structured analyzer above when the manufacturer is unknown, and draft — never send — a supplier outreach email. How many steps that takes isn't fixed in advance; the model chooses based on what each tool returns.
+
+**Tools available to the agent** (`agent/tools.py`):
+- `search_suppliers_by_manufacturer` — read-only database lookup
+- `check_stale_suppliers` — read-only; defaults to the project's real 12-month staleness rule (computed in code) rather than leaving the model to invent a cutoff date
+- `analyze_item_description` — delegates to the structured analyzer above, rather than trusting the agent's own free-form guess for a task that already has a tested, guardrailed component
+- `draft_supplier_email` — a deterministic template fill (not an LLM call), consistent with the fixed-template approach the email module already uses
+
+**There is no send-email tool, anywhere in the registry.** This is architectural, not a prompted instruction: a tool gated behind an approval flag is still a code path from the model to a real send, and a flag can be wrong or bypassed by a future change. Leaving the capability out entirely means there is no such path — the agent cannot send email under any circumstances, not "is told not to." `test_registry_has_no_send_email_tool` checks this mechanically.
+
+**Safety properties enforced in code, not just prompted for:**
+- A hard iteration cap — an agent that can call tools indefinitely can spend money indefinitely; `test_agent_stops_at_iteration_cap_instead_of_running_forever` proves the loop actually stops rather than trusting the model to stop itself.
+- Every tool call is validated and dispatched by the application; an unknown tool name or malformed arguments returns a structured error to the model instead of crashing the loop.
+- `human_review_required` is unconditionally `true` on every result — success, partial completion, or hitting the iteration cap all produce a valid, reviewable result, never an automatic action.
+
+**Tracing:** every call the agent loop makes — and any nested call it triggers (calling `analyze_item_description` invokes the analyzer above) — logs under the same request `trace_id`, in the same `llm_calls.log` file, in call order. One `grep <trace_id> llm_calls.log` shows the full multi-step, multi-module trace for one request.
+
+**Cost, measured from real runs, not estimated:** a single agent run typically costs $0.01–$0.03 and takes 5–15 seconds — roughly an order of magnitude more than the single-shot analyzer above, because every iteration resends the full conversation history and tool schemas, and Sonnet 5 costs more per token than Haiku. This is a deliberate tradeoff: the loop needs the stronger model for adaptive tool selection, the single-shot analyzer doesn't. `GET /rfqs/sample/items/{line_item}/agent-search` is the only endpoint in this API where that cost applies — every other endpoint here is free and near-instant.
 
 ### Example API Response
 
@@ -119,6 +186,7 @@ This is not a full production frontend. It is a small review interface designed 
   "next_action": "review_required",
   "trace_id": "demo_run_001"
 }
+```
 
 ---
 
@@ -212,6 +280,10 @@ The categories above describe how the system *could* be evaluated at scale. A fi
 
 This is intentionally v1 — three cases, checking the mock `/rfqs/sample*` endpoints rather than the real Excel parser or SQLite supplier database. It establishes the pattern (expected vs. actual, automated, catches regressions) that the broader evaluation categories above can grow into.
 
+### 6. LLM Analyzer Evaluation (Implemented)
+
+A second, separate evaluation harness (`eval/compare_analyzers.py`) measures the structured item analyzer specifically — field accuracy, cost, and latency, side by side against a deterministic baseline, on an 11-case hand-labelled dataset. See "AI-Assisted Item Analysis and Supplier-Search Agent" above for the current numbers and what the two disagreement cases revealed. This harness makes real, paid API calls and is run by hand, not in CI.
+
 ---
 
 ## Observability and Logging
@@ -257,6 +329,10 @@ to `llm_calls.log` carrying the same id — with prompt version, token
 counts, cost, latency, and outcome:
 
     grep "items_45a4faeaf6bb" llm_calls.log
+
+The same file also carries the agent's multi-step traces — an agent run's own iteration and tool-call lines, and any nested analyzer call it triggers, all under one `trace_id`:
+
+    grep "agent_9d982330befd" llm_calls.log
 
 No external observability platform is used; the log format is designed
 so a Langfuse-style tool could be added later without changing the
@@ -312,7 +388,7 @@ These steps involve supplier relationships, commercial risk, or incomplete data,
 
 The system should not:
 
-* Send emails without human review
+* Send emails without human review — for the Phase 13 agent specifically, this isn't just a stated rule: there is no send-email tool defined anywhere in its tool registry, so no code path exists from the model to a real send, regardless of prompt or model behavior.
 * Invent missing supplier contact details
 * Invent manufacturer names, part numbers, prices, certificates, or lead times
 * Override validation warnings without user confirmation
@@ -509,6 +585,8 @@ Parsed RFQ Review Response
         │
         ▼
 Human reviews status, warnings, next action, and trace ID
+```
+
 ---
 
 ## Key Technical Decisions & Tradeoffs
@@ -527,6 +605,12 @@ Procurement involves real supplier relationships and real money. An automated sy
 
 ### Why an email sender abstraction layer?
 The `email_sender/` module defines a base interface (`BaseEmailSender`) that any email provider can implement. Currently supports Outlook (via `win32com`) and a Mock sender (for testing). Adding Gmail or another provider in future requires zero changes to the rest of the codebase — just a new implementation file.
+
+### Why Sonnet 5 for the agent loop but Haiku 4.5 for single-item analysis?
+Deciding which tool to call next based on an intermediate result is a harder reasoning task than single-shot field extraction. Haiku is fast and inexpensive for the narrow, well-specified analysis task; Sonnet 5 is reserved for the agent loop, where the stronger model's cost (roughly an order of magnitude higher per run, measured directly from live runs) buys better tool-selection judgment rather than being spent on a task that didn't need it.
+
+### Why no send-email tool for the agent, rather than an approval flag?
+A tool gated behind an approval flag is still a code path from the model to a real send — the flag could be wrong, forgotten, or bypassed by a future change. Leaving the capability out of the tool registry entirely means no such path exists at all. The agent can draft an email for human review; sending is a manual action outside its reach, by construction rather than by instruction.
 
 ---
 
@@ -564,7 +648,7 @@ rfq_ai_project/
 ├── logs/                      # rotating logs (gitignored)
 └── main.py                    # interactive pipeline entry point
 ├── api/                       # FastAPI review API layer
-│   ├── main.py                # API entry point, health check, sample RFQ endpoint
+│   ├── main.py                # API entry point, health check, all routes
 │   ├── schemas.py             # Pydantic API response models
 │   ├── converters.py          # maps parser dataclasses to API responses
 │   └── routes/                # placeholder for future route organization
@@ -573,6 +657,38 @@ rfq_ai_project/
 │   ├── index.html             # page structure
 │   ├── app.js                 # calls FastAPI endpoint using fetch()
 │   └── style.css              # simple dashboard styling
+│
+├── llm/                        # structured item analysis
+│   ├── schemas.py              # AmbiguousItemAnalysis, CallMetrics
+│   ├── ambiguous_item_analyzer.py  # mock (regex + hardcoded list)
+│   ├── analysis_core.py        # provider-neutral prompt/validation
+│   └── claude_analyzer.py      # thin Anthropic adapter over the core
+│
+├── agent/                      # Phase 13 multi-step supplier-search agent
+│   ├── tools.py                # 4 tools + seeded mock supplier DB — no send-email tool
+│   ├── schemas.py              # AgentFinalAnswer, AgentSupplierSearchResult
+│   └── supplier_agent.py       # the loop: dispatch, iteration cap, tracing
+│
+├── db/                         # Phase 9 SQLAlchemy repository layer
+│   ├── models.py                # Supplier model
+│   ├── session.py               # engine/session factory
+│   └── repositories/
+│       └── supplier_repository.py
+│
+├── eval/                       # evaluation harnesses
+│   ├── test_cases.json          # workflow-level (3 cases)
+│   ├── run_eval.py              # workflow-level, runs in CI
+│   ├── analyzer_cases.json      # LLM analyzer (11 cases)
+│   └── compare_analyzers.py     # mock vs. real, accuracy/cost/latency — not in CI
+│
+├── tests/                      # pytest suite — 39/39 passing (see below)
+├── conftest.py                  # project-root import path fix; forces mock analyzer in tests
+├── scripts/
+│   └── manual_agent_test.py     # live, real-cost agent test — not run by pytest or CI
+│
+└── .github/workflows/
+    └── eval.yml                 # runs eval/run_eval.py on every push
+```
 
 ---
 
@@ -599,22 +715,39 @@ You will be guided through:
 
 ```bash
 uvicorn api.main:app --reload
+```
 
 Then open:
 
-http://127.0.0.1:8000/health
+- http://127.0.0.1:8000/health
+- http://127.0.0.1:8000/rfqs/sample
 
-or:
+With the server running, open `frontend/index.html` for the review dashboard, or `http://127.0.0.1:8000/docs` for interactive API docs — including `GET /rfqs/sample/items/{line_item}/agent-search`, which makes real, paid Sonnet 5 calls (see "AI-Assisted Item Analysis and Supplier-Search Agent" below before trying it).
 
-http://127.0.0.1:8000/rfqs/sample
+### Run the automated test suite (pytest)
 
-With the FastAPI server running, open: frontend/index.html
+```bash
+pytest -v
+```
+
+39 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, and the agent loop and its tools. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so running the suite never costs money or touches the network.
 
 ### Run the evaluation harness
+
 ```bash
 python eval/run_eval.py
+```
 
-### Run tests
+### Run the analyzer comparison (real API calls — costs a few cents)
+
+```bash
+python eval/compare_analyzers.py
+```
+
+Compares the mock and real analyzers on an 11-case labelled dataset for field accuracy, cost, and latency — see "AI-Assisted Item Analysis and Supplier-Search Agent" below.
+
+### Run the original module test scripts
+
 ```bash
 python tests/test_parser.py
 python tests/test_supplier_discovery.py
@@ -667,6 +800,11 @@ Docker/containerization is intentionally deferred — the current local developm
 - Supplier candidate responses are mock review examples and are not yet connected to the real SQLite supplier knowledge base.
 - The evaluation harness currently checks a small set of known scenarios (3 cases) against the mock endpoints; it will be expanded over time and eventually connected to the real parser and supplier database.
 - Docker/containerization is intentionally deferred because the current local environment doesn't reliably support Docker — CI runs directly on GitHub's hosted Python environment instead.
+- The agent's tool set is narrow and single-purpose (supplier search for one item) — this demonstrates the pattern, not a general-purpose agent.
+- The agent's supplier database is a small seeded mock, separate from the real `knowledge_base/suppliers.db` used by Module 2 — not yet connected.
+- The agent-search endpoint makes real, paid API calls with no caching, rate limiting, or cost cap — it's a portfolio demo endpoint, not one designed for public or production exposure as-is.
+- No semantic/embedding-based supplier retrieval (RAG) yet — supplier candidates come from the mock endpoint or the agent's direct SQL lookup, not vector search.
+- No MCP implementation — deliberately deferred until after the tool-calling foundation (Phase 13) was built and proven; wrapping tools that didn't exist yet would have been an empty exercise.
 - Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
 - The project remains a portfolio/demo system using mock or sanitized data only.
 
@@ -679,7 +817,11 @@ Docker/containerization is intentionally deferred — the current local developm
 - Expand the evaluation harness beyond 3 cases, and connect it to the real parser/supplier database rather than only the mock endpoints.
 - Add semantic supplier fallback using embeddings/vector search only after deterministic supplier lookup fails.
 - Add a mobile-style client example showing how another client could consume the same JSON contract.
+- Connect the agent's supplier tools to the real SQLite supplier knowledge base instead of the small seeded mock.
+- Add semantic supplier retrieval (RAG) as a fallback tier the agent's search tool can use when a direct manufacturer match fails.
+- Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
 - Add Docker/containerization once the local development environment reliably supports it.
+- Add Kubernetes (via `kind`) once Docker is in place, to demonstrate the deployment model rather than because this workload needs orchestration.
 
 ---
 
