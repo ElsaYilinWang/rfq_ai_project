@@ -108,12 +108,19 @@ in this exact shape, no other text, no markdown code fences:
 }"""
 
 
-def dispatch_tool(tool_name: str, raw_input: dict) -> tuple[dict, bool]:
+def dispatch_tool(
+    tool_name: str, raw_input: dict, trace_id: Optional[str] = None
+) -> tuple[dict, bool]:
     """
     Validates and executes one tool call. Never raises — every failure
     mode (unknown tool, bad arguments, an exception inside the tool
     itself) returns a structured error result instead, so a single bad
     tool call degrades gracefully rather than crashing the whole loop.
+
+    trace_id is passed through to every tool uniformly (unused by
+    three of the four, used by analyze_item_description to keep its
+    nested model call under the same trace as the rest of this run)
+    rather than special-cased per tool, so the dispatcher stays simple.
     """
     entry = TOOL_REGISTRY.get(tool_name)
     if entry is None:
@@ -131,7 +138,7 @@ def dispatch_tool(tool_name: str, raw_input: dict) -> tuple[dict, bool]:
         )
 
     try:
-        result = entry["function"](validated_input)
+        result = entry["function"](validated_input, trace_id=trace_id)
     except Exception as exc:  # noqa: BLE001 — deliberately broad, see docstring
         return (
             {"error": f"Tool '{tool_name}' raised an unexpected error: {exc}"},
@@ -245,7 +252,9 @@ def run_supplier_search_agent(
         )
 
         tool_started = time.perf_counter()
-        result, is_error = dispatch_tool(tool_use_block.name, tool_use_block.input)
+        result, is_error = dispatch_tool(
+            tool_use_block.name, tool_use_block.input, trace_id=trace_id
+        )
         tool_latency = time.perf_counter() - tool_started
 
         logger.info(

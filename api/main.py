@@ -1,7 +1,9 @@
 # api/main.py
+
 import logging
 import uuid
-from fastapi import FastAPI
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from parser.schemas import (
@@ -17,21 +19,26 @@ from api.converters import (
     build_mock_supplier_candidates_response,
 )
 from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
-
 from llm.claude_analyzer import get_analyzer
+from agent.supplier_agent import run_supplier_search_agent
+from agent.schemas import AgentSupplierSearchResult
 
-# All llm.* loggers write one structured line per model call to
-# llm_calls.log (in addition to the console). This is the greppable
-# record that lets a trace_id shown in the dashboard be followed to
-# the exact model call, its tokens, cost, latency, and outcome.
-_llm_logger = logging.getLogger("llm")
-_llm_logger.setLevel(logging.INFO)
-if not _llm_logger.handlers:
-    _handler = logging.FileHandler("llm_calls.log")
-    _handler.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
-    _llm_logger.addHandler(_handler)
+# Both the single-shot analyzer ("llm") and the Phase 13 agent loop
+# ("agent") write one structured line per call to the SAME
+# llm_calls.log file (in addition to the console). This is what makes
+# a trace_id greppable end to end: an agent run's own iteration/tool
+# lines AND any nested analyzer call it triggers (analyze_item_description
+# calls the Phase 11 analyzer internally) all land in one file, in
+# call order, under the same trace_id.
+_llm_calls_handler = logging.FileHandler("llm_calls.log")
+_llm_calls_handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+)
+for _logger_name in ("llm", "agent"):
+    _logger = logging.getLogger(_logger_name)
+    _logger.setLevel(logging.INFO)
+    if not _logger.handlers:
+        _logger.addHandler(_llm_calls_handler)
 
 app = FastAPI(title="RFQ AI Review API")
 
@@ -87,9 +94,6 @@ def build_sample_parsed_rfq() -> ParsedRFQ:
 def get_sample_rfq():
     """
     Return a mock parsed RFQ response.
-
-    This endpoint proves the API schema boundary before connecting
-    the real Excel parser or file upload.
     """
     return parsed_rfq_to_api_response(
         parsed_rfq=build_sample_parsed_rfq(),
@@ -115,6 +119,7 @@ def get_sample_rfq_items():
         trace_id=trace_id,
     )
 
+
 @app.get(
     "/rfqs/sample/supplier-candidates",
     response_model=SupplierCandidatesResponse
@@ -122,12 +127,54 @@ def get_sample_rfq_items():
 def get_sample_rfq_supplier_candidates():
     """
     Return mock supplier candidates for the sample RFQ.
-
-    Mock data only — a later phase connects this to the real SQLite
-    supplier knowledge base via supplier_discovery.py, at which point
-    only build_mock_supplier_candidates_response's replacement needs
-    to change, not this route.
     """
-
     rfq_number = build_sample_parsed_rfq().metadata.rfq_number
     return build_mock_supplier_candidates_response(rfq_number)
+
+
+@app.get(
+    "/rfqs/sample/items/{line_item}/agent-search",
+    response_model=AgentSupplierSearchResult,
+)
+def get_sample_rfq_item_agent_search(line_item: int):
+    """
+    Run the Phase 13 multi-step agent to find supplier candidates for
+    one line item of the sample RFQ.
+
+    line_item is 1-indexed, matching /rfqs/sample/items' numbering.
+
+    IMPORTANT: unlike every other endpoint in this API, this one makes
+    REAL, PAID Sonnet 5 API calls — typically 2-4 calls per request,
+    a few cents total, several seconds of latency. It is not free or
+    instant like the mock endpoints, and there is no rate limiting
+    here; this is a portfolio/demo endpoint, not a production one.
+    """
+    parsed_rfq = build_sample_parsed_rfq()
+
+    if line_item < 1 or line_item > len(parsed_rfq.items):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"line_item {line_item} does not exist; the sample RFQ "
+                f"has {len(parsed_rfq.items)} items."
+            ),
+        )
+
+    item = parsed_rfq.items[line_item - 1]
+    primary_identifier = (
+        item.sourcing_identifiers[0] if item.sourcing_identifiers else None
+    )
+
+    trace_id = f"agent_{uuid.uuid4().hex[:12]}"
+
+    return run_supplier_search_agent(
+        item_description=item.long_description,
+        material_number=item.material_number,
+        known_manufacturer=(
+            primary_identifier.manufacturer if primary_identifier else None
+        ),
+        known_part_number=(
+            primary_identifier.part_number if primary_identifier else None
+        ),
+        trace_id=trace_id,
+    )

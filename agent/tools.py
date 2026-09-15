@@ -132,7 +132,9 @@ class SearchSuppliersInput(BaseModel):
     )
 
 
-def search_suppliers_by_manufacturer(args: SearchSuppliersInput) -> dict:
+def search_suppliers_by_manufacturer(
+    args: SearchSuppliersInput, trace_id: Optional[str] = None
+) -> dict:
     session = _SessionLocal()
     try:
         repository = SupplierRepository(session)
@@ -174,7 +176,9 @@ class CheckStaleSuppliersInput(BaseModel):
 DEFAULT_STALENESS_WINDOW_DAYS = 365
 
 
-def check_stale_suppliers(args: CheckStaleSuppliersInput) -> dict:
+def check_stale_suppliers(
+    args: CheckStaleSuppliersInput, trace_id: Optional[str] = None
+) -> dict:
     if args.cutoff_date is None:
         # The real business rule, computed in code — not left for the
         # model to reconstruct. A live run before this fix showed the
@@ -222,8 +226,17 @@ class AnalyzeItemDescriptionInput(BaseModel):
     )
 
 
-def analyze_item_description(args: AnalyzeItemDescriptionInput) -> dict:
-    analyzer = get_analyzer()
+def analyze_item_description(
+    args: AnalyzeItemDescriptionInput, trace_id: Optional[str] = None
+) -> dict:
+    # Passing trace_id through here is the point of this parameter
+    # existing at all: without it, this nested call to the Phase 11
+    # analyzer would log under trace_id=None, breaking the "one grep
+    # finds every call made while answering one request" property
+    # Phase 12c built. get_analyzer(trace_id=...) binds it via
+    # functools.partial when the real analyzer is used; the mock
+    # ignores it (nothing to trace on a regex).
+    analyzer = get_analyzer(trace_id=trace_id)
     analysis = analyzer(args.description)
     return analysis.model_dump()
 
@@ -251,7 +264,9 @@ class DraftSupplierEmailInput(BaseModel):
     )
 
 
-def draft_supplier_email(args: DraftSupplierEmailInput) -> dict:
+def draft_supplier_email(
+    args: DraftSupplierEmailInput, trace_id: Optional[str] = None
+) -> dict:
     """
     Deterministic template fill — NOT an LLM call. Consistent with
     Module 3's existing design ("uses fixed templates and structured
