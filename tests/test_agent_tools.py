@@ -1,7 +1,7 @@
 # tests/test_agent_tools.py
 
 """
-Tests for the Phase 13 agent tool functions (agent/tools.py).
+Tests for the Phase 13/14c agent tool functions (agent/tools.py).
 
 These test the tools in isolation, with no Anthropic call involved —
 the same "no real API calls, no cost, no network flakiness" approach
@@ -9,20 +9,31 @@ used for llm/ambiguous_item_analyzer.py's tests. What's being checked
 here is that each tool behaves correctly given valid arguments, and
 fails SAFELY (a structured result, not a crash) given bad ones — since
 a tool that raises would break the whole agent loop mid-run.
+
+search_suppliers_semantically is tested here with find_semantic_matches
+MOCKED — retrieval quality itself is already tested for real, with no
+mocking, in tests/test_semantic_retrieval.py. This file only checks
+that the tool correctly wraps whatever retrieval returns.
 """
+
+import threading
+from unittest.mock import patch
 
 from agent.tools import (
     AnalyzeItemDescriptionInput,
     CheckStaleSuppliersInput,
     DraftSupplierEmailInput,
     SearchSuppliersInput,
+    SearchSuppliersSemanticInput,
     TOOL_REGISTRY,
     analyze_item_description,
     build_anthropic_tool_definitions,
     check_stale_suppliers,
     draft_supplier_email,
     search_suppliers_by_manufacturer,
+    search_suppliers_semantically,
 )
+from retrieval.schemas import SemanticMatch
 
 
 def test_search_suppliers_finds_known_manufacturer():
@@ -155,6 +166,39 @@ def test_draft_supplier_email_uses_partial_identification_when_available():
     assert "to be confirmed" not in identification_line
 
 
+def test_search_suppliers_semantically_wraps_a_found_match():
+    fake_match = SemanticMatch(
+        matched_description="Flowserve mechanical seal kit for centrifugal pump, standard duty",
+        supplier_name="Mock Flowserve Supplier",
+        manufacturer="Flowserve",
+        similarity_score=0.57,
+    )
+    with patch("agent.tools.find_semantic_matches", return_value=[fake_match]):
+        result = search_suppliers_semantically(
+            SearchSuppliersSemanticInput(description="Seal kit for heat exchanger")
+        )
+
+    assert result["found"] is True
+    assert result["count"] == 1
+    assert result["matches"][0]["manufacturer"] == "Flowserve"
+    assert result["matches"][0]["similarity_score"] == 0.57
+
+
+def test_search_suppliers_semantically_no_match_is_not_an_error():
+    """
+    Correct abstention, same principle as everywhere else in this
+    project: no match found is a valid result, not a failure.
+    """
+    with patch("agent.tools.find_semantic_matches", return_value=[]):
+        result = search_suppliers_semantically(
+            SearchSuppliersSemanticInput(description="totally unrelated query")
+        )
+
+    assert result["found"] is False
+    assert result["count"] == 0
+    assert result["matches"] == []
+
+
 def test_registry_has_no_send_email_tool():
     """
     The core safety property of this phase, checked mechanically
@@ -176,3 +220,39 @@ def test_anthropic_tool_definitions_are_well_formed():
         assert tool_def["strict"] is True
         assert tool_def["input_schema"]["type"] == "object"
         assert "title" not in tool_def["input_schema"]
+
+
+def test_database_tools_work_correctly_from_a_different_thread():
+    """
+    Regression test for a real bug found in a live agent run:
+    check_stale_suppliers crashed with 'no such table: suppliers' when
+    called from a FastAPI request, despite working fine in every
+    single-threaded test and script. Root cause: FastAPI dispatches
+    synchronous route handlers to a thread pool, and SQLAlchemy's
+    DEFAULT pooling for sqlite ":memory:" gives each NEW thread its
+    own separate, empty database — only the thread that ran this
+    module's import ever saw the seeded data. Every test in this file
+    up to this one runs single-threaded inside the pytest process, so
+    none of them could have caught this; a genuine second thread is
+    required to reproduce or guard against it.
+
+    Fixed with poolclass=StaticPool (see agent/tools.py). This test
+    calls a DB-backed tool from a real, separate thread and asserts it
+    still sees the seeded data — proving the fix, not just asserting
+    it in a comment.
+    """
+    results = {}
+
+    def call_from_new_thread():
+        result = search_suppliers_by_manufacturer(
+            SearchSuppliersInput(manufacturer="ABB")
+        )
+        results["result"] = result
+
+    thread = threading.Thread(target=call_from_new_thread)
+    thread.start()
+    thread.join(timeout=5)
+
+    assert "result" in results, "tool call from a new thread did not complete"
+    assert results["result"]["found"] is True
+    assert results["result"]["count"] == 2

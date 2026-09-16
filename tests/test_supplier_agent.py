@@ -15,6 +15,7 @@ matter which path it took.
 from unittest.mock import MagicMock, patch
 
 from agent.supplier_agent import dispatch_tool, run_supplier_search_agent
+from retrieval.schemas import SemanticMatch
 
 
 class FakeTextBlock:
@@ -227,3 +228,63 @@ def test_agent_never_calls_send_email_because_it_does_not_exist_as_a_tool():
     for forbidden_name in ("send_email", "send_supplier_email", "send"):
         result, is_error = dispatch_tool(forbidden_name, {"to": "x@example.com"})
         assert is_error is True
+
+
+def test_agent_falls_back_to_semantic_search_when_manufacturer_search_empty():
+    """
+    Phase 14c: the full three-tool chain — analyze finds no
+    manufacturer -> semantic search is tried as the fallback -> finds
+    a match -> final answer. This proves the new tool is reachable
+    through the ACTUAL dispatch mechanism inside the loop, not just
+    callable in isolation (that part is already covered in
+    test_agent_tools.py).
+    """
+    responses = [
+        FakeResponse(
+            content=[FakeToolUseBlock(
+                "t1", "analyze_item_description",
+                {"description": "Seal kit for heat exchanger"},
+            )],
+            stop_reason="tool_use",
+        ),
+        FakeResponse(
+            content=[FakeToolUseBlock(
+                "t2", "search_suppliers_semantically",
+                {"description": "Seal kit for heat exchanger"},
+            )],
+            stop_reason="tool_use",
+        ),
+        FakeResponse(
+            content=[FakeTextBlock(
+                '{"summary": "No manufacturer identified, but a semantic '
+                'match was found with a modest similarity score.", '
+                '"manufacturer_identified": null, '
+                '"supplier_candidates_found": true, '
+                '"recommended_next_step": "review semantic match with caution"}'
+            )],
+            stop_reason="end_turn",
+        ),
+    ]
+
+    fake_match = SemanticMatch(
+        matched_description="Flowserve mechanical seal kit for centrifugal pump, standard duty",
+        supplier_name="Mock Flowserve Supplier",
+        manufacturer="Flowserve",
+        similarity_score=0.57,
+    )
+
+    with patch("agent.supplier_agent.Anthropic", return_value=fake_client(responses)):
+        with patch("agent.tools.find_semantic_matches", return_value=[fake_match]):
+            result = run_supplier_search_agent(
+                item_description="Seal kit for heat exchanger",
+                trace_id="test_trace_005",
+            )
+
+    assert result.completed is True
+    assert len(result.tool_calls) == 2
+    assert result.tool_calls[0].tool_name == "analyze_item_description"
+    assert result.tool_calls[1].tool_name == "search_suppliers_semantically"
+    assert result.tool_calls[1].is_error is False
+    assert result.supplier_candidates_found is True
+    assert result.manufacturer_identified is None
+    assert result.human_review_required is True

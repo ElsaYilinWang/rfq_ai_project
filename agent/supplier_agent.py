@@ -88,11 +88,19 @@ that manufacturer directly.
 2. If the manufacturer is unknown, use the item-analysis tool first. Only \
 search for suppliers using a manufacturer that tool actually returned — \
 never guess a manufacturer yourself from the description.
-3. If suppliers are found, you may check whether they are stale.
-4. If you find a good supplier candidate, you may draft an outreach email \
+3. If manufacturer-based search finds nothing — either no manufacturer \
+could be identified, or one was identified but the search returned no \
+results — try the semantic search tool as a fallback. It searches by \
+description similarity, not manufacturer name, and its matches are \
+weaker evidence: always report the similarity score, and never treat a \
+semantic match as equivalent to a manufacturer-based match.
+4. If suppliers are found by either method, you may check whether they \
+are stale.
+5. If you find a good supplier candidate, you may draft an outreach email \
 for human review. Never claim or imply that an email was sent.
-5. If no manufacturer can be identified and no suppliers are found, say so \
-plainly — do not fabricate a candidate.
+6. If no manufacturer can be identified, manufacturer-based search finds \
+nothing, AND semantic search also finds nothing above its threshold, say \
+so plainly — do not fabricate a candidate.
 
 Never invent supplier names, emails, or manufacturer identifications that \
 did not come from a tool result.

@@ -57,20 +57,39 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from db.models import Base, Supplier
 from db.repositories.supplier_repository import SupplierRepository
 from llm.claude_analyzer import get_analyzer
+from retrieval.semantic_search import find_semantic_matches
 
 
 # ---------------------------------------------------------------------
 # Seeded in-memory database, module-level so it's created once and
-# reused across every tool call in the process (verified: SQLAlchemy
-# keeps the same in-memory SQLite database alive across sessions as
-# long as they share one Engine).
+# reused across every tool call in the process.
+#
+# poolclass=StaticPool + check_same_thread=False is required here, not
+# optional. A real live agent run surfaced this the hard way: FastAPI
+# runs synchronous route handlers in a thread pool, and SQLAlchemy's
+# DEFAULT pooling for sqlite ":memory:" (SingletonThreadPool) gives
+# every NEW thread it sees its own completely separate, empty
+# database — the seeded data only exists on whichever thread happened
+# to run this module's import. That bug is non-deterministic: it only
+# fires when the thread pool schedules a request onto a worker thread
+# that's never touched this engine before, which is exactly why
+# earlier manual tests worked by chance and a later one didn't.
+# StaticPool shares ONE real connection across every thread instead,
+# which is the standard fix for this exact situation. Verified with a
+# genuine multi-threaded reproduction, not just a single-threaded
+# script — see tests/test_agent_tools.py's cross-thread test.
 # ---------------------------------------------------------------------
 
-_engine = create_engine("sqlite:///:memory:")
+_engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
 Base.metadata.create_all(_engine)
 _SessionLocal = sessionmaker(bind=_engine)
 
@@ -311,6 +330,47 @@ def draft_supplier_email(
 
 
 # ---------------------------------------------------------------------
+# Tool 5 — search_suppliers_semantically (Phase 14c)
+# ---------------------------------------------------------------------
+
+class SearchSuppliersSemanticInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(
+        description=(
+            "The RFQ item's raw description, to search for similar "
+            "historical items by meaning rather than exact wording."
+        )
+    )
+
+
+def search_suppliers_semantically(
+    args: SearchSuppliersSemanticInput, trace_id: Optional[str] = None
+) -> dict:
+    """
+    Fallback search by description similarity (Phase 14a/14b), for
+    when manufacturer-based search has nothing to work with. Returns
+    a similarity score with every match as evidence — a low score is
+    weak evidence, not a confident finding, and the caller (the model,
+    via the system prompt) is told to treat it that way.
+    """
+    matches = find_semantic_matches(args.description, top_k=3)
+    return {
+        "found": len(matches) > 0,
+        "count": len(matches),
+        "matches": [
+            {
+                "supplier_name": m.supplier_name,
+                "manufacturer": m.manufacturer,
+                "similarity_score": m.similarity_score,
+                "matched_historical_description": m.matched_description,
+            }
+            for m in matches
+        ],
+    }
+
+
+# ---------------------------------------------------------------------
 # Registry — maps tool name to its input schema, Python function, and
 # the Anthropic-facing tool definition (derived from the Pydantic
 # schema, not hand-duplicated).
@@ -355,6 +415,21 @@ TOOL_REGISTRY = {
             "This ONLY produces draft text — it never sends anything. "
             "There is no tool available to send email; drafts always "
             "require a human to review and send manually."
+        ),
+    },
+    "search_suppliers_semantically": {
+        "input_model": SearchSuppliersSemanticInput,
+        "function": search_suppliers_semantically,
+        "description": (
+            "Search historical RFQ items by DESCRIPTION SIMILARITY "
+            "rather than manufacturer name. Use this ONLY as a "
+            "fallback — after search_suppliers_by_manufacturer has "
+            "either found nothing or had no manufacturer to search "
+            "with. Deterministic manufacturer matching is more "
+            "reliable and should always be tried first when possible. "
+            "Every result includes a similarity score: treat a low "
+            "score as weak evidence, never as equivalent to a "
+            "manufacturer-based match."
         ),
     },
 }
