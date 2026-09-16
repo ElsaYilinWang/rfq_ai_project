@@ -2,8 +2,8 @@
 """
 Design note — why supplier candidates get a converter function too:
 
-Phase 3's mock supplier-candidate data could have been built directly
-inside the /rfqs/sample/supplier-candidates route in main.py — that's
+Phase 3\'s mock supplier-candidate data could have been built directly
+inside the /rfqs/sample/supplier-candidates route in main.py -- that\'s
 literally what the project plan for this week specifies, and it would
 work fine for a demo.
 
@@ -24,24 +24,24 @@ business logic again.
 
 """
 ParsedRFQ.metadata.rfq_number
-→ API rfq_number
+-> API rfq_number
 
 len(ParsedRFQ.items)
-→ API items_processed
+-> API items_processed
 
 LineItem.flags
-→ API warnings
+-> API warnings
 
 ParsedRFQ.overall_flags
-→ API warnings
+-> API warnings
 
 warnings exist?
-→ status = validation_warning
-→ next_action = review_required
+-> status = validation_warning
+-> next_action = review_required
 
 no warnings?
-→ status = parsed_successfully
-→ next_action = supplier_discovery_ready
+-> status = parsed_successfully
+-> next_action = supplier_discovery_ready
 """
 
 from typing import List, Optional, Callable
@@ -57,6 +57,7 @@ from api.schemas import (
     SupplierCandidateResponse,
     SupplierCandidatesResponse,
 )
+from retrieval.semantic_search import find_semantic_matches
 
 
 
@@ -64,69 +65,37 @@ def parsed_rfq_to_api_response(
     parsed_rfq: ParsedRFQ,
     trace_id: str | None = None
 ) -> RFQParseResponse:
-    """
-    Convert the internal parser ParsedRFQ dataclass into an API-facing response.
-
-    Internal model:
-        ParsedRFQ -> metadata, items, overall_flags
-
-    API model:
-        RFQParseResponse -> rfq_number, status, items_processed,
-        warnings, next_action, trace_id
-
-    This keeps internal workflow structures separate from the external API contract.
-    """
-
     warnings: List[ValidationWarning] = []
 
-    # Convert item-level flags into API validation warnings
     for index, item in enumerate(parsed_rfq.items, start=1):
         for flag in item.flags:
             warnings.append(
-                ValidationWarning(
-                    line_item=index,
-                    field="line_item",
-                    message=flag
-                )
+                ValidationWarning(line_item=index, field="line_item", message=flag)
             )
-
-        # Optional: create more specific warnings from missing important fields
         if not item.material_number:
             warnings.append(
                 ValidationWarning(
-                    line_item=index,
-                    field="material_number",
+                    line_item=index, field="material_number",
                     message="Missing material number; human review may be required."
                 )
             )
-
         if not item.long_description:
             warnings.append(
                 ValidationWarning(
-                    line_item=index,
-                    field="long_description",
+                    line_item=index, field="long_description",
                     message="Missing long description; supplier discovery may be unreliable."
                 )
             )
-
         if not item.sourcing_identifiers:
             warnings.append(
                 ValidationWarning(
-                    line_item=index,
-                    field="sourcing_identifiers",
+                    line_item=index, field="sourcing_identifiers",
                     message="No manufacturer or part number extracted; human review required."
                 )
             )
 
-    # Convert overall RFQ-level flags into API warnings
     for flag in parsed_rfq.overall_flags:
-        warnings.append(
-            ValidationWarning(
-                line_item=0,
-                field="rfq",
-                message=flag
-            )
-        )
+        warnings.append(ValidationWarning(line_item=0, field="rfq", message=flag))
 
     if warnings:
         status = "validation_warning"
@@ -150,39 +119,6 @@ def parsed_rfq_to_items_response(
     analyzer: Optional[Callable[[str], AmbiguousItemAnalysis]] = None,
     trace_id: Optional[str] = None,
 ) -> RFQItemsResponse:
-    """
-    Convert the internal parser ParsedRFQ dataclass into a line-item-level
-    API response.
-
-    Internal model:
-        LineItem -> material_number, long_description, uom, quantity,
-        sourcing_identifiers (List[SourcingIdentifier]), flags
-
-    API model:
-        LineItemResponse -> line_item, material_number, description,
-        manufacturer, part_number, uom, quantity, flags
-
-    Key transformation:
-        An item can carry MULTIPLE sourcing_identifiers internally.
-        The API flattens this to a single manufacturer/part_number pair,
-        taking the first identifier as "primary." Surfacing alternates
-        is a candidate for a later phase.
-    
-        The `analyzer` parameter (Phase 11a):
-        A callable taking a description string and returning an
-        AmbiguousItemAnalysis. It is called ONLY for items where the
-        parser found no sourcing identifiers — i.e. exactly the point
-        where deterministic extraction has already failed and a human
-        would otherwise be left with nothing but the raw description.
-
-        It is optional and defaults to None, which keeps this function
-        pure and instant. That matters once the analyzer is backed by a
-        real LLM call: API contract tests and the eval harness can pass
-        None and stay fast and free, while the live route passes the
-        real one. Deterministic-first is preserved — the analyzer never
-        overrides parser output, it only fills a gap the parser left.
-    """
-
     item_responses: List[LineItemResponse] = []
 
     for index, item in enumerate(parsed_rfq.items, start=1):
@@ -217,44 +153,80 @@ def parsed_rfq_to_items_response(
         trace_id=trace_id,
     )
 
-def build_mock_supplier_candidates_response(
-    rfq_number: str
+def build_supplier_candidates_response(
+    parsed_rfq: ParsedRFQ,
 ) -> SupplierCandidatesResponse:
     """
-    Build mock supplier candidates for a given RFQ number.
+    Build supplier candidates for each line item of the RFQ.
 
-    Mock data only for Phase 3 — no SQLite lookup yet. One candidate
-    represents a deterministic historical match (source =
-    historical_sql_match), and one represents a lower-confidence
-    fallback that requires a human to confirm (source =
-    semantic_fallback_candidate). This mirrors the real matching
-    priority described in your project docs: exact/historical match
-    first, semantic fallback only when that's insufficient, and any
-    semantic suggestion requires human review rather than being
-    trusted outright.
+    Renamed from build_mock_supplier_candidates_response — as of
+    Phase 14b this is only PARTLY mock. The old version took just
+    rfq_number and hardcoded exactly two candidates regardless of what
+    was actually in the RFQ; it never had access to item data to
+    search against at all.
+
+    Per item:
+      - A known manufacturer (from deterministic parsing) gets a
+        historical match. This half is STILL mock/hardcoded — wiring
+        it to the real SQLite supplier knowledge base
+        (supplier_discovery.py) is separate, still-open work, not
+        part of Phase 14. See the design note at the top of this file
+        and the README's Future Improvements.
+      - No known manufacturer means deterministic lookup has nothing
+        to search on. This is where Phase 14's real semantic
+        retrieval fires, searching the item's raw description against
+        a small historical corpus (retrieval/corpus.py).
+
+    If semantic retrieval finds nothing above its similarity
+    threshold, NO candidate is added for that item. An empty result
+    is the correct, honest outcome when nothing in the historical
+    corpus is actually similar — not a bug to paper over by lowering
+    the threshold or forcing a guess.
     """
 
-    supplier_candidates = [
-        SupplierCandidateResponse(
-            manufacturer="ABB",
-            supplier_name="Mock ABB Supplier",
-            source="historical_sql_match",
-            stale=False,
-            human_review_required=False,
-            reason="Matched by manufacturer history",
-        ),
-        SupplierCandidateResponse(
-            manufacturer=None,
-            supplier_name="Mock Semantic Candidate",
-            source="semantic_fallback_candidate",
-            stale=None,
-            human_review_required=True,
-            reason="Description-only item requires human review",
-        ),
-    ]
+    supplier_candidates: List[SupplierCandidateResponse] = []
+
+    for item in parsed_rfq.items:
+        primary_identifier = (
+            item.sourcing_identifiers[0] if item.sourcing_identifiers else None
+        )
+
+        if primary_identifier is not None and primary_identifier.manufacturer:
+            supplier_candidates.append(
+                SupplierCandidateResponse(
+                    manufacturer=primary_identifier.manufacturer,
+                    supplier_name=f"Mock {primary_identifier.manufacturer} Supplier",
+                    source="historical_sql_match",
+                    stale=False,
+                    human_review_required=False,
+                    reason="Matched by manufacturer history",
+                )
+            )
+            continue
+
+        matches = find_semantic_matches(item.long_description, top_k=1)
+        if not matches:
+            # Correct abstention — nothing in the corpus is similar
+            # enough to trust. No candidate for this item at all.
+            continue
+
+        top_match = matches[0]
+        supplier_candidates.append(
+            SupplierCandidateResponse(
+                manufacturer=top_match.manufacturer,
+                supplier_name=top_match.supplier_name,
+                source="semantic_fallback_candidate",
+                stale=None,
+                human_review_required=True,
+                reason=(
+                    f"Semantic match (similarity={top_match.similarity_score:.2f}) "
+                    f'to historical item: "{top_match.matched_description}"'
+                ),
+            )
+        )
 
     return SupplierCandidatesResponse(
-        rfq_number=rfq_number,
+        rfq_number=parsed_rfq.metadata.rfq_number,
         supplier_candidates=supplier_candidates,
         next_action="review_supplier_candidates",
     )

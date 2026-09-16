@@ -16,7 +16,7 @@ from parser.schemas import (
 from api.converters import (
     parsed_rfq_to_api_response,
     parsed_rfq_to_items_response,
-    build_mock_supplier_candidates_response,
+    build_supplier_candidates_response,
 )
 from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
 from llm.claude_analyzer import get_analyzer
@@ -126,10 +126,15 @@ def get_sample_rfq_items():
 )
 def get_sample_rfq_supplier_candidates():
     """
-    Return mock supplier candidates for the sample RFQ.
+    Return supplier candidates for each line item of the sample RFQ.
+
+    Items with a known manufacturer get a (still mock) historical
+    match. Items with no known manufacturer are searched via Phase
+    14's real semantic retrieval against the item's raw description —
+    see build_supplier_candidates_response for what happens when
+    nothing scores above the similarity threshold.
     """
-    rfq_number = build_sample_parsed_rfq().metadata.rfq_number
-    return build_mock_supplier_candidates_response(rfq_number)
+    return build_supplier_candidates_response(build_sample_parsed_rfq())
 
 
 @app.get(
