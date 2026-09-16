@@ -26,10 +26,11 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
 - API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
 - Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
-- Automated testing with pytest (39 tests), an evaluation harness, and CI on every push
+- Automated testing with pytest (55 tests), an evaluation harness, and CI on every push
 - A lightweight SQLAlchemy repository layer over a supplier database
 - A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
+- Local semantic retrieval (`sentence-transformers`, no API cost) as a calibrated fallback when no manufacturer signal exists at all, wired into both the API and the agent
 
 ## What Is This?
 
@@ -79,7 +80,7 @@ This layer is intentionally small. It does not replace the core parser, supplier
 - `GET /health` confirms that the FastAPI service is running.
 - `GET /rfqs/sample` returns a structured sample RFQ parse response (status, warnings, next action, trace ID).
 - `GET /rfqs/sample/items` returns line-item-level detail (material number, description, manufacturer, part number, UOM, quantity, flags) for the sample RFQ. Items with no manufacturer or part number also carry a `suggestion` field — the output of the LLM analyzer described below.
-- `GET /rfqs/sample/supplier-candidates` returns mock supplier candidates, distinguishing deterministic historical matches from lower-confidence semantic-fallback candidates that require human review.
+- `GET /rfqs/sample/supplier-candidates` returns per-item supplier candidates: a (still mock) historical match for items with a known manufacturer, or a real semantic-retrieval match — with a genuine similarity score — for items with none. If nothing scores above the retrieval threshold, no candidate is returned for that item at all, rather than a forced guess.
 - `GET /rfqs/sample/items/{line_item}/agent-search` runs the multi-step agent (see below) for one line item. Unlike every other endpoint here, this one makes real, paid API calls — not mock data.
 - Pydantic models define the external API response contract for each endpoint.
 - Converter functions in `api/converters.py` map internal parser dataclasses into API-friendly JSON, so a future swap from mock data to the real SQLite supplier database only changes the converter body, not the routes.
@@ -145,12 +146,13 @@ This is not run in CI — it makes real, paid API calls. Run it by hand with `py
 
 `agent/supplier_agent.py` is a genuinely multi-step, tool-calling agent (Claude Sonnet 5) — the project's only component where the model decides what to do next based on an intermediate result, rather than producing one structured answer from one input.
 
-Given one RFQ line item, it can: search the supplier database by manufacturer, check which suppliers haven't been contacted recently, call the structured analyzer above when the manufacturer is unknown, and draft — never send — a supplier outreach email. How many steps that takes isn't fixed in advance; the model chooses based on what each tool returns.
+Given one RFQ line item, it can: search the supplier database by manufacturer, fall back to semantic retrieval when no manufacturer is known or found, check which suppliers haven't been contacted recently, call the structured analyzer above when the manufacturer is unknown, and draft — never send — a supplier outreach email. How many steps that takes isn't fixed in advance; the model chooses based on what each tool returns.
 
 **Tools available to the agent** (`agent/tools.py`):
 - `search_suppliers_by_manufacturer` — read-only database lookup
 - `check_stale_suppliers` — read-only; defaults to the project's real 12-month staleness rule (computed in code) rather than leaving the model to invent a cutoff date
 - `analyze_item_description` — delegates to the structured analyzer above, rather than trusting the agent's own free-form guess for a task that already has a tested, guardrailed component
+- `search_suppliers_semantically` — Phase 14's fallback for items with no manufacturer signal at all; searches by description similarity, used only after manufacturer-based search has been tried (see "Semantic supplier retrieval" below)
 - `draft_supplier_email` — a deterministic template fill (not an LLM call), consistent with the fixed-template approach the email module already uses
 
 **There is no send-email tool, anywhere in the registry.** This is architectural, not a prompted instruction: a tool gated behind an approval flag is still a code path from the model to a real send, and a flag can be wrong or bypassed by a future change. Leaving the capability out entirely means there is no such path — the agent cannot send email under any circumstances, not "is told not to." `test_registry_has_no_send_email_tool` checks this mechanically.
@@ -163,6 +165,22 @@ Given one RFQ line item, it can: search the supplier database by manufacturer, c
 **Tracing:** every call the agent loop makes — and any nested call it triggers (calling `analyze_item_description` invokes the analyzer above) — logs under the same request `trace_id`, in the same `llm_calls.log` file, in call order. One `grep <trace_id> llm_calls.log` shows the full multi-step, multi-module trace for one request.
 
 **Cost, measured from real runs, not estimated:** a single agent run typically costs $0.01–$0.03 and takes 5–15 seconds — roughly an order of magnitude more than the single-shot analyzer above, because every iteration resends the full conversation history and tool schemas, and Sonnet 5 costs more per token than Haiku. This is a deliberate tradeoff: the loop needs the stronger model for adaptive tool selection, the single-shot analyzer doesn't. `GET /rfqs/sample/items/{line_item}/agent-search` is the only endpoint in this API where that cost applies — every other endpoint here is free and near-instant.
+
+### Semantic supplier retrieval
+
+Everything above handles items where a manufacturer is either known or can be extracted by the structured analyzer. This section covers what's left: an item with genuinely no manufacturer signal at all, where the only thing left to search on is what the item actually *is*.
+
+**How it works** (`retrieval/`): a local `sentence-transformers` model (`all-MiniLM-L6-v2`) embeds a small mock historical corpus (`retrieval/corpus.py` — 11 records of past RFQ items paired with the supplier that fulfilled them) and compares a new item's description against it by cosine similarity. No API call, no per-query cost — this runs entirely on the local machine after a one-time model download.
+
+The corpus is deliberately not 11 unrelated entries. Three pairs are near-duplicates by design — the same product type from two different manufacturers (an ABB and a Schneider Electric circuit breaker; a John Crane and a Flowserve pump seal), and the same manufacturer across two different product types (an ABB breaker and an ABB drive) — because a corpus where everything is trivially distinguishable can't actually demonstrate discrimination. A real diagnostic run confirmed every near-duplicate pair was correctly told apart by the language in the query, not just by rough topic.
+
+**Calibrated, not guessed:** the similarity threshold (`0.5`) was set from that real diagnostic run, not picked before anything was measured. Every genuine match scored 0.58 or higher; every true-negative query (something entirely unrelated to procurement) scored 0.14 or lower. `0.5` sits with real margin on both sides of that gap.
+
+**Wired into the workflow (Phase 14b):** `GET /rfqs/sample/supplier-candidates` now calls this for real, for any item with no known manufacturer — replacing a hardcoded "Mock Semantic Candidate" stub that had sat unused since the very first week of this project (the response shape existed six months before the thing it described was ever built). If nothing scores above threshold, **no candidate is returned for that item at all** — correct abstention, not a fallback guess. In practice: the sample RFQ's "Seal kit for heat exchanger" item scores 0.57 against the corpus's *pump* seal records — genuinely the closest thing available, still an honestly weak match, not a confident one.
+
+**A fifth agent tool (Phase 14c):** `search_suppliers_semantically` gives the multi-step agent access to this as an explicit fallback — used only after manufacturer-based search has been tried and found nothing. In a live run, the agent reached for it unprompted, reported both candidates with their similarity scores, and added reasoning the prompt never explicitly asked for: *"these relate to pump seals, not heat exchangers specifically, so they are weak evidence only."*
+
+**A real concurrency bug, found by that same live run:** `check_stale_suppliers` crashed with `no such table: suppliers` — nothing to do with retrieval itself, but a SQLite concurrency issue. FastAPI runs synchronous routes in a thread pool, and SQLAlchemy's default pooling for SQLite `:memory:` silently gives every new thread its own separate, empty database. The bug had existed since Phase 13a; it only surfaced once a live request happened to land on a worker thread that had never touched the seeded data before. Fixed with `poolclass=StaticPool`, and reproduced in both directions — fails without the fix, passes with it — in a genuine multi-threaded test, the only test in this project where real threading is required for the test to mean anything.
 
 ### Example API Response
 
@@ -283,6 +301,10 @@ This is intentionally v1 — three cases, checking the mock `/rfqs/sample*` endp
 ### 6. LLM Analyzer Evaluation (Implemented)
 
 A second, separate evaluation harness (`eval/compare_analyzers.py`) measures the structured item analyzer specifically — field accuracy, cost, and latency, side by side against a deterministic baseline, on an 11-case hand-labelled dataset. See "AI-Assisted Item Analysis and Supplier-Search Agent" above for the current numbers and what the two disagreement cases revealed. This harness makes real, paid API calls and is run by hand, not in CI.
+
+### 7. Semantic Retrieval Evaluation (Implemented)
+
+Unlike every other AI component in this project, semantic retrieval needed no mocking to test for real: a local embedding model is deterministic (the same text always produces the same vector), so `tests/test_semantic_retrieval.py` asserts against real similarity scores directly — discrimination between near-duplicate corpus entries, correct rejection of true-negative queries, and the calibrated threshold itself, all checked against actual model output rather than assumed behavior. See "Semantic supplier retrieval" above for what those real scores were.
 
 ---
 
@@ -612,6 +634,15 @@ Deciding which tool to call next based on an intermediate result is a harder rea
 ### Why no send-email tool for the agent, rather than an approval flag?
 A tool gated behind an approval flag is still a code path from the model to a real send — the flag could be wrong, forgotten, or bypassed by a future change. Leaving the capability out of the tool registry entirely means no such path exists at all. The agent can draft an email for human review; sending is a manual action outside its reach, by construction rather than by instruction.
 
+### Why local embeddings (sentence-transformers) instead of a hosted vector database or API-based embeddings?
+No API cost, no network dependency after the model is cached once, and a brute-force cosine similarity search is genuinely fine at this corpus size (11 records). A real vector database (FAISS, Pinecone) would be solving a scale problem this project doesn't have yet.
+
+### Why does semantic search only fire after manufacturer-based search fails?
+Same deterministic-first priority used everywhere else in this project: exact/manufacturer matching is more reliable when it's available, so semantic retrieval is a fallback for when there's nothing else to search on, never a first choice.
+
+### Why does agent/tools.py's database engine use StaticPool?
+A real live agent run crashed with `no such table: suppliers` — not a retrieval bug, a SQLite concurrency one. FastAPI runs synchronous routes in a thread pool, and SQLAlchemy's default pooling for SQLite `:memory:` gives every new thread its own separate, empty database. `StaticPool` shares one real connection across every thread instead — the standard fix, verified with a genuine multi-threaded test that fails without it and passes with it.
+
 ---
 
 ## Project Structure
@@ -664,8 +695,13 @@ rfq_ai_project/
 │   ├── analysis_core.py        # provider-neutral prompt/validation
 │   └── claude_analyzer.py      # thin Anthropic adapter over the core
 │
-├── agent/                      # Phase 13 multi-step supplier-search agent
-│   ├── tools.py                # 4 tools + seeded mock supplier DB — no send-email tool
+├── retrieval/                   # Phase 14 semantic supplier retrieval
+│   ├── schemas.py                # HistoricalItem, SemanticMatch
+│   ├── corpus.py                 # 11-record mock historical corpus, incl. near-duplicate pairs
+│   └── semantic_search.py        # local sentence-transformers embeddings + cosine similarity
+│
+├── agent/                      # Phase 13/14c multi-step supplier-search agent
+│   ├── tools.py                # 5 tools + seeded mock supplier DB — no send-email tool
 │   ├── schemas.py              # AgentFinalAnswer, AgentSupplierSearchResult
 │   └── supplier_agent.py       # the loop: dispatch, iteration cap, tracing
 │
@@ -681,10 +717,11 @@ rfq_ai_project/
 │   ├── analyzer_cases.json      # LLM analyzer (11 cases)
 │   └── compare_analyzers.py     # mock vs. real, accuracy/cost/latency — not in CI
 │
-├── tests/                      # pytest suite — 39/39 passing (see below)
+├── tests/                      # pytest suite — 55/55 passing (8 need real network, see How to Run)
 ├── conftest.py                  # project-root import path fix; forces mock analyzer in tests
 ├── scripts/
-│   └── manual_agent_test.py     # live, real-cost agent test — not run by pytest or CI
+│   ├── manual_agent_test.py     # live, real-cost agent test — not run by pytest or CI
+│   └── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
 │
 └── .github/workflows/
     └── eval.yml                 # runs eval/run_eval.py on every push
@@ -730,7 +767,7 @@ With the server running, open `frontend/index.html` for the review dashboard, or
 pytest -v
 ```
 
-39 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, and the agent loop and its tools. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so running the suite never costs money or touches the network.
+55 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, and semantic retrieval. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
 
 ### Run the evaluation harness
 
@@ -745,6 +782,14 @@ python eval/compare_analyzers.py
 ```
 
 Compares the mock and real analyzers on an 11-case labelled dataset for field accuracy, cost, and latency — see "AI-Assisted Item Analysis and Supplier-Search Agent" below.
+
+### Run the semantic retrieval diagnostic
+
+```bash
+python scripts/semantic_retrieval_diagnostic.py
+```
+
+Prints raw similarity scores (no threshold applied) for a set of planned test queries against the corpus — free, local, no API calls. This is what the `0.5` threshold and the test assertions in `tests/test_semantic_retrieval.py` were actually calibrated from.
 
 ### Run the original module test scripts
 
@@ -797,13 +842,13 @@ Docker/containerization is intentionally deferred — the current local developm
 
 - The FastAPI layer currently exposes sample RFQ review, line-item, and supplier-candidate endpoints backed by mock data — not the full Excel upload workflow.
 - The frontend is a lightweight local review dashboard, not a deployed production web application.
-- Supplier candidate responses are mock review examples and are not yet connected to the real SQLite supplier knowledge base.
+- The historical/manufacturer-match half of supplier candidates is still mock data, not connected to the real SQLite supplier knowledge base — the semantic-fallback half is real as of Phase 14, but searches a small separate mock corpus, not the real historical database.
+- The semantic retrieval corpus is a small (11-record) mock dataset that doesn't cover every equipment category — e.g. it has no heat-exchanger-specific entries, so that kind of query can only ever find a modestly-similar adjacent match (pump seals), never a strong one.
 - The evaluation harness currently checks a small set of known scenarios (3 cases) against the mock endpoints; it will be expanded over time and eventually connected to the real parser and supplier database.
 - Docker/containerization is intentionally deferred because the current local environment doesn't reliably support Docker — CI runs directly on GitHub's hosted Python environment instead.
 - The agent's tool set is narrow and single-purpose (supplier search for one item) — this demonstrates the pattern, not a general-purpose agent.
 - The agent's supplier database is a small seeded mock, separate from the real `knowledge_base/suppliers.db` used by Module 2 — not yet connected.
 - The agent-search endpoint makes real, paid API calls with no caching, rate limiting, or cost cap — it's a portfolio demo endpoint, not one designed for public or production exposure as-is.
-- No semantic/embedding-based supplier retrieval (RAG) yet — supplier candidates come from the mock endpoint or the agent's direct SQL lookup, not vector search.
 - No MCP implementation — deliberately deferred until after the tool-calling foundation (Phase 13) was built and proven; wrapping tools that didn't exist yet would have been an empty exercise.
 - Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
 - The project remains a portfolio/demo system using mock or sanitized data only.
@@ -815,10 +860,9 @@ Docker/containerization is intentionally deferred — the current local developm
 - Add draft preview endpoints before Outlook draft creation.
 - Improve warning normalization so duplicate or overlapping validation messages are grouped cleanly.
 - Expand the evaluation harness beyond 3 cases, and connect it to the real parser/supplier database rather than only the mock endpoints.
-- Add semantic supplier fallback using embeddings/vector search only after deterministic supplier lookup fails.
 - Add a mobile-style client example showing how another client could consume the same JSON contract.
 - Connect the agent's supplier tools to the real SQLite supplier knowledge base instead of the small seeded mock.
-- Add semantic supplier retrieval (RAG) as a fallback tier the agent's search tool can use when a direct manufacturer match fails.
+- Expand the semantic retrieval corpus to cover more equipment/product categories, reducing forced adjacent-category matches like the current heat-exchanger example.
 - Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
 - Add Docker/containerization once the local development environment reliably supports it.
 - Add Kubernetes (via `kind`) once Docker is in place, to demonstrate the deployment model rather than because this workload needs orchestration.
