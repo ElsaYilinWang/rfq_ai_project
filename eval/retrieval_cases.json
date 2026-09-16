@@ -1,0 +1,56 @@
+[
+  {
+    "case_id": "bearing_paraphrase_no_brand",
+    "description": "sealed ball bearing, 6205 size, standard duty",
+    "expected_match": true,
+    "note": "Paraphrase of the SKF bearing record, no brand mentioned."
+  },
+  {
+    "case_id": "plc_paraphrase_no_brand",
+    "description": "PLC controller starter kit with power supply unit",
+    "expected_match": true,
+    "note": "Paraphrase of the Siemens S7-1200 record ('controller' instead of 'PLC', 'power supply unit' instead of 'power supply')."
+  },
+  {
+    "case_id": "pressure_sensor_paraphrase",
+    "description": "pressure sensor, 0 to 16 bar measurement range",
+    "expected_match": true,
+    "note": "Paraphrase of the Danfoss MBS3000 record, using 'sensor' instead of 'transmitter'."
+  },
+  {
+    "case_id": "pneumatic_cylinder_paraphrase",
+    "description": "double acting pneumatic cylinder, 50mm bore, 200mm stroke",
+    "expected_match": true,
+    "note": "Paraphrase of the Festo DSBC-50-200 record, using bore/stroke terminology instead of the part number."
+  },
+  {
+    "case_id": "seal_kit_heat_exchanger",
+    "description": "Seal kit for heat exchanger",
+    "expected_match": true,
+    "note": "The actual ambiguous item from the sample RFQ. No heat-exchanger-specific corpus entry exists; the honest expectation is a weak match against the pump-seal records, not a strong one -- see README 'Semantic supplier retrieval'."
+  },
+  {
+    "case_id": "bearing_from_analyzer_cases",
+    "description": "Bearing 6205-2RS quantity 15 delivery 2 weeks",
+    "expected_match": true,
+    "note": "Reused from eval/analyzer_cases.json's bearing_no_manufacturer case for continuity -- that case already established a known-correct part number extraction; this checks whether retrieval also finds a supplier for the same real description."
+  },
+  {
+    "case_id": "flange_gasket_no_match",
+    "description": "flange gasket, spiral wound, 6 inch, 150 class",
+    "expected_match": false,
+    "note": "No gasket entries anywhere in the corpus. Correct behavior is no match, not a forced guess."
+  },
+  {
+    "case_id": "armored_cable_no_match",
+    "description": "armored electrical cable, 4 core, 16mm2",
+    "expected_match": false,
+    "note": "No cable entries in the corpus."
+  },
+  {
+    "case_id": "safety_relay_no_match",
+    "description": "safety relay module, dual channel, category 4",
+    "expected_match": false,
+    "note": "No safety relay entries in the corpus. Deliberately chosen to be in the same broad domain (electrical control equipment) as the PLC and contactor records, to check the system doesn't over-match within a domain just because the topic is adjacent."
+  }
+]

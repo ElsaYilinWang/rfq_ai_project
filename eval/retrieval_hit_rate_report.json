@@ -1,0 +1,111 @@
+{
+  "total_cases": 9,
+  "correct": 9,
+  "accuracy": 1.0,
+  "true_positive_rate": 1.0,
+  "true_negative_rate": 1.0,
+  "results": [
+    {
+      "case_id": "bearing_paraphrase_no_brand",
+      "description": "sealed ball bearing, 6205 size, standard duty",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock SKF Supplier",
+        "manufacturer": "SKF",
+        "similarity_score": 0.7925,
+        "matched_description": "SKF deep groove ball bearing 6205-2RS, sealed"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "plc_paraphrase_no_brand",
+      "description": "PLC controller starter kit with power supply unit",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock Siemens Supplier",
+        "manufacturer": "Siemens",
+        "similarity_score": 0.8242,
+        "matched_description": "Siemens S7-1200 PLC starter kit with power supply"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "pressure_sensor_paraphrase",
+      "description": "pressure sensor, 0 to 16 bar measurement range",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock Danfoss Supplier",
+        "manufacturer": "Danfoss",
+        "similarity_score": 0.6195,
+        "matched_description": "Danfoss pressure transmitter MBS3000, 0-16 bar range"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "pneumatic_cylinder_paraphrase",
+      "description": "double acting pneumatic cylinder, 50mm bore, 200mm stroke",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock Festo Supplier",
+        "manufacturer": "Festo",
+        "similarity_score": 0.7246,
+        "matched_description": "Festo pneumatic cylinder DSBC-50-200, double acting"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "seal_kit_heat_exchanger",
+      "description": "Seal kit for heat exchanger",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock Flowserve Supplier",
+        "manufacturer": "Flowserve",
+        "similarity_score": 0.5716,
+        "matched_description": "Flowserve mechanical seal kit for centrifugal pump, standard duty"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "bearing_from_analyzer_cases",
+      "description": "Bearing 6205-2RS quantity 15 delivery 2 weeks",
+      "expected_match": true,
+      "found_match": true,
+      "top_match": {
+        "supplier_name": "Mock SKF Supplier",
+        "manufacturer": "SKF",
+        "similarity_score": 0.532,
+        "matched_description": "SKF deep groove ball bearing 6205-2RS, sealed"
+      },
+      "correct": true
+    },
+    {
+      "case_id": "flange_gasket_no_match",
+      "description": "flange gasket, spiral wound, 6 inch, 150 class",
+      "expected_match": false,
+      "found_match": false,
+      "top_match": null,
+      "correct": true
+    },
+    {
+      "case_id": "armored_cable_no_match",
+      "description": "armored electrical cable, 4 core, 16mm2",
+      "expected_match": false,
+      "found_match": false,
+      "top_match": null,
+      "correct": true
+    },
+    {
+      "case_id": "safety_relay_no_match",
+      "description": "safety relay module, dual channel, category 4",
+      "expected_match": false,
+      "found_match": false,
+      "top_match": null,
+      "correct": true
+    }
+  ]
+}
