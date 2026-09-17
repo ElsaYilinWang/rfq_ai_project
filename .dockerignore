@@ -1,0 +1,12 @@
+venv/
+venv_wsl/
+venv312/
+__pycache__/
+*.pyc
+.env
+.git/
+.pytest_cache/
+llm_calls.log
+eval/eval_report.json
+eval/analyzer_comparison.json
+eval/retrieval_hit_rate_report.json

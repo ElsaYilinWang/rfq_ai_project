@@ -24,3 +24,34 @@ jobs:
 
       - name: Run evaluation harness
         run: python eval/run_eval.py
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t rfq-ai-api .
+
+      - name: Smoke-test the container
+        run: |
+          docker run -d -p 8000:8000 --name rfq-ai-api-test rfq-ai-api
+
+          # Retry instead of a fixed sleep -- more robust than guessing
+          # how long uvicorn takes to bind inside a fresh container.
+          # Should be fast here regardless: the embedding model is
+          # baked into the image, so there's no first-request download
+          # to wait out on startup.
+          for i in $(seq 1 15); do
+            if curl --fail --silent http://localhost:8000/health; then
+              echo "Container responded healthy on attempt $i"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Container never became healthy"
+          docker logs rfq-ai-api-test
+          exit 1
