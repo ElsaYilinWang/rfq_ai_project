@@ -31,6 +31,7 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
 - Local semantic retrieval (`sentence-transformers`, no API cost) as a calibrated fallback when no manufacturer signal exists at all, wired into both the API and the agent
+- A Docker image with the full dependency stack — including local retrieval — built, debugged, and verified end to end, with CI now building and smoke-testing it on every push
 
 ## What Is This?
 
@@ -643,6 +644,36 @@ Same deterministic-first priority used everywhere else in this project: exact/ma
 ### Why does agent/tools.py's database engine use StaticPool?
 A real live agent run crashed with `no such table: suppliers` — not a retrieval bug, a SQLite concurrency one. FastAPI runs synchronous routes in a thread pool, and SQLAlchemy's default pooling for SQLite `:memory:` gives every new thread its own separate, empty database. `StaticPool` shares one real connection across every thread instead — the standard fix, verified with a genuine multi-threaded test that fails without it and passes with it.
 
+### Why install PyTorch from a separate CPU-only wheel index?
+The default PyPI `torch` wheel on Linux bundles the full NVIDIA CUDA runtime by default, on the assumption a GPU might be present. This container has no GPU, and a similarity search over an 11-record corpus wouldn't benefit from one even if it did — installing from PyTorch's dedicated CPU index (`download.pytorch.org/whl/cpu`) avoided several gigabytes of genuinely unused dependencies, cutting the final image from a likely 5-6GB down to a measured 1.61GB.
+
+### Why did the Docker build need to happen from WSL2's own filesystem, not the Windows-mounted drive?
+Every file Docker reads to build its context crosses WSL2's Windows/Linux filesystem boundary when the project lives under `/mnt/d`, and that boundary carries a real, well-documented performance cost for workloads with many small files — a Python venv with PyTorch installed is close to a worst case. `docker build` (and a plain `du -sh` on the same folder) hung for the better part of an hour before the fix: copying the project into WSL2's native filesystem first, the standard Microsoft-documented practice for exactly this situation.
+
+---
+
+## Containerization
+
+The API and its full dependency stack — including local semantic retrieval — run in a Docker container, built and verified end to end: every endpoint tested inside the container, including a real Claude call, real embedding retrieval, and the full multi-step agent loop with its SQL-backed tools.
+
+### What's in the image
+
+The `Dockerfile` starts from `python:3.11-slim` (matching the Python version CI already used), installs `libgomp1` explicitly — a widely-documented gap in slim Debian images that breaks importing PyTorch with `libgomp.so.1: cannot open shared object file` if left unfixed — then installs dependencies, bakes the semantic retrieval embedding model into the image at build time, and copies in the application code.
+
+**The embedding model is baked in at build time, not left to download on first request.** This is the standard production pattern for a service depending on a third-party model hub: the exact model version is pinned to the image build, and the running container has no runtime dependency on reaching Hugging Face at all — important in any environment with restricted network egress, and it avoids a container's first real request paying a multi-second download delay. Confirmed in practice: `GET /rfqs/sample/supplier-candidates` responds instantly inside the container, with the identical similarity score (`0.57` for the Flowserve match) it produces everywhere else this project has run it.
+
+**Secrets are never baked into the image.** `.dockerignore` excludes `.env`; `ANTHROPIC_API_KEY` is passed at `docker run` time (`-e ANTHROPIC_API_KEY=...`), the same principle established back when the real Claude analyzer was first wired in — a key baked into an image layer is recoverable by anyone who ever gets that image, even after a later layer appears to remove it.
+
+### Two real bugs, found by actually building it
+
+**PyTorch pulled in the full NVIDIA CUDA runtime by default.** The first real build correctly installed `sentence-transformers`, but its `torch` dependency resolved to the default PyPI wheel — which bundles the entire GPU/CUDA toolkit (`nvidia-cudnn`, `nvidia-cublas`, `nvidia-cusparse`, `triton`, and more), several extra gigabytes for hardware this container doesn't have and a workload that wouldn't benefit from a GPU even if it did. Fixed by installing from PyTorch's own dedicated CPU-only wheel index before installing the rest of `requirements.txt`, so the CPU build was already satisfied by the time `sentence-transformers` looked for `torch`. Measured effect: the final image is `1.61GB`.
+
+**`docker build` silently hung for the better part of an hour**, with no error and no progress, because the project lived on a Windows-mounted drive (`/mnt/d`, accessed from WSL2), and every file Docker needed to read for the build context crossed WSL2's Windows/Linux filesystem boundary — a well-documented performance cliff for workloads with many small files. A plain `du -sh` on the same folder hung identically, which is what isolated the cause to filesystem access rather than anything Docker-specific. Fixed by copying the project into WSL2's own native filesystem before building. A second false trail during the same investigation — two long-forgotten virtual environments (`venv_wsl/`, `venv312/`) that had never come up before — turned out to be responsible for a 5.7GB `rsync` transfer; excluding them and deleting them from the copy brought it down to under 1MB of real project files.
+
+### Continuous Integration
+
+A second CI job, `docker-build`, runs in parallel with the evaluation harness on every push: builds the image, starts a container from it, and polls `GET /health` until it responds — or fails the job after 30 seconds if it never does — proving the container actually starts and serves a request, not just that the image built without error. It deliberately stops at `/health`: hitting any endpoint that makes a real Claude call would need `ANTHROPIC_API_KEY` as a GitHub secret and would add real cost to every single push, breaking the "CI stays free" principle this project has held since Phase 6.
+
 ---
 
 ## Project Structure
@@ -723,8 +754,11 @@ rfq_ai_project/
 │   ├── manual_agent_test.py     # live, real-cost agent test — not run by pytest or CI
 │   └── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
 │
+├── Dockerfile                   # Phase 15 container build — CPU-only torch, model baked in at build time
+├── .dockerignore                # excludes .env, venv/, caches, generated reports from the build context
+│
 └── .github/workflows/
-    └── eval.yml                 # runs eval/run_eval.py on every push
+    └── eval.yml                 # runs eval/run_eval.py AND docker-build (build + /health smoke test) on every push
 ```
 
 ---
@@ -760,6 +794,15 @@ Then open:
 - http://127.0.0.1:8000/rfqs/sample
 
 With the server running, open `frontend/index.html` for the review dashboard, or `http://127.0.0.1:8000/docs` for interactive API docs — including `GET /rfqs/sample/items/{line_item}/agent-search`, which makes real, paid Sonnet 5 calls (see "AI-Assisted Item Analysis and Supplier-Search Agent" below before trying it).
+
+### Run with Docker
+
+```bash
+docker build -t rfq-ai-api .
+docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key_here rfq-ai-api
+```
+
+The embedding model is baked into the image at build time (see "Containerization" above), so `GET /rfqs/sample/supplier-candidates` responds instantly inside the container — no live Hugging Face download. `ANTHROPIC_API_KEY` is passed at `docker run` time, never baked into the image. First build takes a few minutes (PyTorch plus the embedding model); rebuilds are much faster unless `requirements.txt` changes, since Docker caches that layer.
 
 ### Run the automated test suite (pytest)
 
@@ -825,7 +868,7 @@ End-to-end workflow tested using realistic RFQ-style scenarios based on hands-on
 
 The evaluation harness runs automatically through GitHub Actions on every push and pull request (`.github/workflows/eval.yml`). The workflow installs dependencies from `requirements.txt` and runs `python eval/run_eval.py`; the job fails if any evaluation case actually fails, not just if the script crashes.
 
-Docker/containerization is intentionally deferred — the current local development environment doesn't reliably support Docker — so this CI workflow runs directly on GitHub's hosted Python environment instead of a container. This keeps automated checking in place without requiring Docker locally.
+A second job, `docker-build`, runs in parallel: builds the Docker image and confirms the container actually starts and responds to `GET /health` — not just that the image built without error. See "Containerization" above for exactly what it checks and why it deliberately stops at a free, keyless endpoint rather than exercising the full API.
 
 
 ---
@@ -845,7 +888,8 @@ Docker/containerization is intentionally deferred — the current local developm
 - The historical/manufacturer-match half of supplier candidates is still mock data, not connected to the real SQLite supplier knowledge base — the semantic-fallback half is real as of Phase 14, but searches a small separate mock corpus, not the real historical database.
 - The semantic retrieval corpus is a small (11-record) mock dataset that doesn't cover every equipment category — e.g. it has no heat-exchanger-specific entries, so that kind of query can only ever find a modestly-similar adjacent match (pump seals), never a strong one.
 - The evaluation harness currently checks a small set of known scenarios (3 cases) against the mock endpoints; it will be expanded over time and eventually connected to the real parser and supplier database.
-- Docker/containerization is intentionally deferred because the current local environment doesn't reliably support Docker — CI runs directly on GitHub's hosted Python environment instead.
+- The Docker image runs as root (no `USER` directive) — fine for this portfolio demo, but a real hardening step before any actual deployment.
+- The container runs as a single instance with no orchestration, restart policy, or resource limits — Kubernetes (planned next) is where those concerns get addressed properly, not Docker alone.
 - The agent's tool set is narrow and single-purpose (supplier search for one item) — this demonstrates the pattern, not a general-purpose agent.
 - The agent's supplier database is a small seeded mock, separate from the real `knowledge_base/suppliers.db` used by Module 2 — not yet connected.
 - The agent-search endpoint makes real, paid API calls with no caching, rate limiting, or cost cap — it's a portfolio demo endpoint, not one designed for public or production exposure as-is.
@@ -864,8 +908,8 @@ Docker/containerization is intentionally deferred — the current local developm
 - Connect the agent's supplier tools to the real SQLite supplier knowledge base instead of the small seeded mock.
 - Expand the semantic retrieval corpus to cover more equipment/product categories, reducing forced adjacent-category matches like the current heat-exchanger example.
 - Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
-- Add Docker/containerization once the local development environment reliably supports it.
-- Add Kubernetes (via `kind`) once Docker is in place, to demonstrate the deployment model rather than because this workload needs orchestration.
+- Add a non-root `USER` to the Docker image, plus resource limits, before treating it as anything beyond a portfolio demo.
+- Add Kubernetes (via `kind`) — the natural next step now that Docker is real and verified, to demonstrate the deployment model rather than because this workload needs orchestration.
 
 ---
 
