@@ -32,6 +32,7 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
 - Local semantic retrieval (`sentence-transformers`, no API cost) as a calibrated fallback when no manufacturer signal exists at all, wired into both the API and the agent
 - A Docker image with the full dependency stack — including local retrieval — built, debugged, and verified end to end, with CI now building and smoke-testing it on every push
+- A working local Kubernetes deployment (`kind`) — Deployment, Service, and Secret, with health-check probes reusing the same `/health` endpoint Docker's CI already relies on, verified end to end and including a real production-shaped bug found and fixed along the way
 
 ## What Is This?
 
@@ -183,6 +184,8 @@ The corpus is deliberately not 11 unrelated entries. Three pairs are near-duplic
 
 **A real concurrency bug, found by that same live run:** `check_stale_suppliers` crashed with `no such table: suppliers` — nothing to do with retrieval itself, but a SQLite concurrency issue. FastAPI runs synchronous routes in a thread pool, and SQLAlchemy's default pooling for SQLite `:memory:` silently gives every new thread its own separate, empty database. The bug had existed since Phase 13a; it only surfaced once a live request happened to land on a worker thread that had never touched the seeded data before. Fixed with `poolclass=StaticPool`, and reproduced in both directions — fails without the fix, passes with it — in a genuine multi-threaded test, the only test in this project where real threading is required for the test to mean anything.
 
+**Measured with independently-designed cases (Phase 14d):** `eval/retrieval_hit_rate.py` answers a different question than the mechanism-level tests above — not "does retrieval work correctly" but "does adding it actually help across realistic queries." Nine cases, built before checking how any of them would score: four paraphrases into corpus categories the diagnostic run never stress-tested, two real descriptions reused from the analyzer's own eval set for continuity, and three genuine gaps (a flange gasket, armored cable, a safety relay) where the corpus has nothing relevant and the correct answer is no match at all. Result: 9/9 correct — 100% of cases expecting a match found one, 100% of cases expecting no match correctly abstained. Run it with `python eval/retrieval_hit_rate.py`.
+
 ### Example API Response
 
 ```json
@@ -306,6 +309,10 @@ A second, separate evaluation harness (`eval/compare_analyzers.py`) measures the
 ### 7. Semantic Retrieval Evaluation (Implemented)
 
 Unlike every other AI component in this project, semantic retrieval needed no mocking to test for real: a local embedding model is deterministic (the same text always produces the same vector), so `tests/test_semantic_retrieval.py` asserts against real similarity scores directly — discrimination between near-duplicate corpus entries, correct rejection of true-negative queries, and the calibrated threshold itself, all checked against actual model output rather than assumed behavior. See "Semantic supplier retrieval" above for what those real scores were.
+
+### 8. Semantic Retrieval Hit-Rate Measurement (Implemented)
+
+A second, higher-level retrieval evaluation, distinct from the mechanism-level tests in section 7 above: `eval/retrieval_hit_rate.py` checks whether semantic fallback actually surfaces a usable candidate across a realistic spread of ambiguous items, not just whether the underlying similarity math is correct in isolation. See "Semantic supplier retrieval" above for the corpus design and the 9/9 result. Free and local, not run in CI.
 
 ---
 
@@ -511,7 +518,9 @@ The system is split into three independent modules, each with clear inputs and o
 
 ### 4. Simple Infrastructure
 
-No cloud databases, no Docker, no Kubernetes. SQLite for storage, Python standard library where possible, win32com for Outlook integration. The right tool for the right job — not the most impressive tool.
+SQLite for storage, Python standard library where possible, win32com for Outlook integration. The right tool for the right job — not the most impressive tool.
+
+This principle held even once Docker and Kubernetes entered the picture (Phases 15–16): both were added deliberately, as a learning exercise in the deployment model, not because an 11-record demo workload actually needs a container orchestrator. `kind` over a managed cluster, `ClusterIP` over `NodePort`, one replica, no ingress controller — every choice stayed as minimal as the thing being demonstrated required, the same instinct that picked SQLite over PostgreSQL back in Module 2.
 
 ---
 
@@ -650,6 +659,15 @@ The default PyPI `torch` wheel on Linux bundles the full NVIDIA CUDA runtime by 
 ### Why did the Docker build need to happen from WSL2's own filesystem, not the Windows-mounted drive?
 Every file Docker reads to build its context crosses WSL2's Windows/Linux filesystem boundary when the project lives under `/mnt/d`, and that boundary carries a real, well-documented performance cost for workloads with many small files — a Python venv with PyTorch installed is close to a worst case. `docker build` (and a plain `du -sh` on the same folder) hung for the better part of an hour before the fix: copying the project into WSL2's native filesystem first, the standard Microsoft-documented practice for exactly this situation.
 
+### Why `imagePullPolicy: Never` in the Kubernetes manifest?
+With a `:latest` tag and no explicit override, Kubernetes defaults to `imagePullPolicy: Always` — meaning it ignores an image already loaded locally (via `kind load docker-image`) and tries to pull from a public registry instead, failing immediately since the image only exists on this machine. A well-documented `kind`-specific trap, fixed before it was ever hit rather than after.
+
+### Why `ClusterIP` and `kubectl port-forward` instead of `NodePort`?
+`NodePort` has real friction specifically under `kind` (its own documentation recommends `port-forward` or extra cluster configuration for a smooth local experience). `ClusterIP` is Kubernetes' own default and the textbook-minimal way to expose a service — the right amount of infrastructure for demonstrating the model, not the most direct route to a public port.
+
+### Why does the agent's parse-failure logging matter more than it looks?
+A live Kubernetes run hit a real, pre-existing gap: the code silently defaulted to an empty string when a model response had no `text` content block, and the error handling only logged the resulting exception, never what actually caused it. The fix — log the raw text on a parse failure, log which block types were present when there's no text at all — didn't change what the agent does when something goes wrong (it still degrades safely, same as before); it changed whether a *future* occurrence of this can actually be diagnosed instead of just observed.
+
 ---
 
 ## Containerization
@@ -673,6 +691,32 @@ The `Dockerfile` starts from `python:3.11-slim` (matching the Python version CI 
 ### Continuous Integration
 
 A second CI job, `docker-build`, runs in parallel with the evaluation harness on every push: builds the image, starts a container from it, and polls `GET /health` until it responds — or fails the job after 30 seconds if it never does — proving the container actually starts and serves a request, not just that the image built without error. It deliberately stops at `/health`: hitting any endpoint that makes a real Claude call would need `ANTHROPIC_API_KEY` as a GitHub secret and would add real cost to every single push, breaking the "CI stays free" principle this project has held since Phase 6.
+
+---
+
+## Kubernetes
+
+The same image from "Containerization" above runs under a real, local Kubernetes cluster (`kind` — Kubernetes-in-Docker), not because this workload needs orchestration, but to demonstrate the deployment model: a `Deployment`, a `Service`, and a `Secret`, applied with `kubectl` and verified end to end against every endpoint — the exact same checklist used for Docker.
+
+### What's deployed
+
+`k8s/deployment.yaml` runs one replica of the image, with CPU/memory requests and limits set, and a `readinessProbe`/`livenessProbe` both pointed at `/health` — reusing the exact endpoint already built for Docker's own CI smoke test, rather than inventing a second health-check mechanism. `k8s/service.yaml` exposes it internally as a `ClusterIP`, reached locally via `kubectl port-forward` rather than `NodePort` — the simpler, more standard choice for a local `kind` cluster, and genuinely sufficient for what's being demonstrated here.
+
+**The Secret is never committed, same principle as `.env` in Docker.** `ANTHROPIC_API_KEY` is created directly in the cluster with an imperative `kubectl create secret` command — the real key never touches a file that could end up in git. Kubernetes `Secret` objects are only base64-*encoded*, not encrypted, so a committed one with a real value would be exactly as exposed as committing the key in plaintext.
+
+### A gotcha caught before it bit, and a real bug found by actually deploying it
+
+**`imagePullPolicy` defaults to `Always` for a `:latest` tag** — meaning, without an explicit override, Kubernetes would ignore the image already loaded into the cluster (`kind load docker-image`) and try to pull `rfq-ai-api:latest` from a public registry where it doesn't exist, failing immediately with `ImagePullBackOff`. This is a well-documented `kind`-specific trap; fixed proactively with `imagePullPolicy: Never` in the manifest, verified before it ever caused a failure.
+
+**A real bug, found only because the full verification checklist was re-run under Kubernetes specifically:** the agent-search endpoint returned `"The agent did not return a valid final answer"` for a request that had succeeded cleanly every previous time it had been run, anywhere. The actual log line — `Failed to parse agent final answer | error=Expecting value: line 1 column 1 (char 0)` — is Python's signature for an empty string reaching the JSON parser. The cause: the code extracting the model's final answer defaulted silently to an empty string whenever `response.content` contained no `text`-type block, and the existing error handling logged only the exception, never the text (or absence of it) that caused it — a real, pre-existing gap in `agent/supplier_agent.py` that had been there since Phase 13, invisible until a live request finally triggered it.
+
+Fixed two ways: the fallback path now logs which content block types *were* actually present when no text block exists, and the parse-failure path now logs the raw text itself — closing the exact diagnostic gap that made this incident hard to explain in the first place. A new test, `test_agent_handles_end_turn_with_no_text_block`, reproduces the missing-text-block shape directly and proves the fix degrades safely (same `human_review_required: true`, same honest fallback) rather than crashing. Rebuilt, reloaded into the cluster, and redeployed via `kubectl rollout restart` — a real rolling replacement, watched live: the new pod reached `1/1 Ready` before Kubernetes terminated the old one.
+
+**A related, still-open finding:** `kubectl logs` shows only `uvicorn`'s own stdout access log — none of this project's own structured logging (`llm_calls.log`, the `trace_id`-tagged lines documented under "Observability and Logging") is visible that way, because it's written to a file inside the container's filesystem, not to stdout. The file is still real and readable with `kubectl exec ... -- cat llm_calls.log`, which is how the bug above was actually diagnosed — but this is a genuine limitation worth fixing, not something Kubernetes caused: the same gap existed in Docker too, it just took deploying under `kubectl` to notice it, since `docker logs` was never specifically checked against this file either.
+
+### Verified
+
+The same five-endpoint checklist from Docker, re-run against the cluster through `kubectl port-forward`: health, sample RFQ, items (confirming the `Secret` delivered the API key correctly), supplier-candidates (confirming the baked-in embedding model survived the image transfer into the cluster — the same `0.57` similarity score it has now produced identically in five separate environments), and the full agent-search path, including the SQL-backed tools and the `StaticPool` fix, under Kubernetes' own process model specifically.
 
 ---
 
@@ -757,6 +801,10 @@ rfq_ai_project/
 ├── Dockerfile                   # Phase 15 container build — CPU-only torch, model baked in at build time
 ├── .dockerignore                # excludes .env, venv/, caches, generated reports from the build context
 │
+├── k8s/                          # Phase 16 Kubernetes manifests
+│   ├── deployment.yaml            # 1 replica, imagePullPolicy: Never, /health readiness+liveness probes
+│   └── service.yaml               # ClusterIP, reached via kubectl port-forward
+│
 └── .github/workflows/
     └── eval.yml                 # runs eval/run_eval.py AND docker-build (build + /health smoke test) on every push
 ```
@@ -803,6 +851,18 @@ docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key_here rfq-ai-api
 ```
 
 The embedding model is baked into the image at build time (see "Containerization" above), so `GET /rfqs/sample/supplier-candidates` responds instantly inside the container — no live Hugging Face download. `ANTHROPIC_API_KEY` is passed at `docker run` time, never baked into the image. First build takes a few minutes (PyTorch plus the embedding model); rebuilds are much faster unless `requirements.txt` changes, since Docker caches that layer.
+
+### Run with Kubernetes (kind)
+
+```bash
+kind create cluster --name rfq-ai
+kind load docker-image rfq-ai-api:latest --name rfq-ai
+kubectl create secret generic rfq-ai-secrets --from-literal=ANTHROPIC_API_KEY=your_key_here
+kubectl apply -f k8s/
+kubectl port-forward svc/rfq-ai-api 8000:8000
+```
+
+Same endpoints as above, same behavior — the whole point of this phase was proving that. The Secret is created directly in the cluster, never written to a committed file (see "Kubernetes" below). After changing code: rebuild the image, `kind load` it again, then `kubectl rollout restart deployment rfq-ai-api` to redeploy without deleting anything by hand.
 
 ### Run the automated test suite (pytest)
 
@@ -889,7 +949,8 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - The semantic retrieval corpus is a small (11-record) mock dataset that doesn't cover every equipment category — e.g. it has no heat-exchanger-specific entries, so that kind of query can only ever find a modestly-similar adjacent match (pump seals), never a strong one.
 - The evaluation harness currently checks a small set of known scenarios (3 cases) against the mock endpoints; it will be expanded over time and eventually connected to the real parser and supplier database.
 - The Docker image runs as root (no `USER` directive) — fine for this portfolio demo, but a real hardening step before any actual deployment.
-- The container runs as a single instance with no orchestration, restart policy, or resource limits — Kubernetes (planned next) is where those concerns get addressed properly, not Docker alone.
+- The Kubernetes deployment runs a single replica with no autoscaling and no ingress controller, and its Secret was created manually rather than through a managed secrets tool — correct for demonstrating the model, not a production configuration.
+- Custom application logging (`llm_calls.log`, the trace-ID system) is invisible to `kubectl logs` (and `docker logs`) since it writes to a file, not stdout — reachable with `kubectl exec ... -- cat llm_calls.log`, but not the way either tool expects to show it.
 - The agent's tool set is narrow and single-purpose (supplier search for one item) — this demonstrates the pattern, not a general-purpose agent.
 - The agent's supplier database is a small seeded mock, separate from the real `knowledge_base/suppliers.db` used by Module 2 — not yet connected.
 - The agent-search endpoint makes real, paid API calls with no caching, rate limiting, or cost cap — it's a portfolio demo endpoint, not one designed for public or production exposure as-is.
@@ -908,8 +969,10 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - Connect the agent's supplier tools to the real SQLite supplier knowledge base instead of the small seeded mock.
 - Expand the semantic retrieval corpus to cover more equipment/product categories, reducing forced adjacent-category matches like the current heat-exchanger example.
 - Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
-- Add a non-root `USER` to the Docker image, plus resource limits, before treating it as anything beyond a portfolio demo.
-- Add Kubernetes (via `kind`) — the natural next step now that Docker is real and verified, to demonstrate the deployment model rather than because this workload needs orchestration.
+- Add a non-root `USER` to the Docker image before treating it as anything beyond a portfolio demo.
+- Make custom application logging visible to `kubectl logs`/`docker logs` directly (e.g. also logging to stdout), instead of requiring `kubectl exec` to read it from inside the container.
+- Add a CI job that deploys into a `kind` cluster on every push, the same way `docker-build` already verifies the image — a natural extension of the existing CI pattern, not yet built.
+- Add an ingress controller for a cleaner way to reach the service than `kubectl port-forward`.
 
 ---
 
