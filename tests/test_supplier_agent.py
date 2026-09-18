@@ -217,6 +217,28 @@ def test_agent_final_answer_malformed_json_falls_back_safely():
     assert result.human_review_required is True
     assert result.recommended_next_step == "escalate to human sourcing"
 
+def test_agent_handles_end_turn_with_no_text_block():
+    """
+    Regression test for a real incident: stop_reason was "end_turn"
+    but response.content contained no text-type block at all. Must
+    degrade safely -- same fallback path as malformed JSON -- not
+    raise, and must now log which block types WERE present.
+    """
+    class FakeNonTextBlock:
+        type = "some_other_block_type"
+
+    responses = [
+        FakeResponse(content=[FakeNonTextBlock()], stop_reason="end_turn"),
+    ]
+
+    with patch("agent.supplier_agent.Anthropic", return_value=fake_client(responses)):
+        result = run_supplier_search_agent(
+            item_description="test item", trace_id="test_trace_006"
+        )
+
+    assert result.completed is True
+    assert result.human_review_required is True
+    assert result.recommended_next_step == "escalate to human sourcing"
 
 def test_agent_never_calls_send_email_because_it_does_not_exist_as_a_tool():
     """

@@ -156,11 +156,18 @@ def dispatch_tool(
     return result, False
 
 
-def _parse_final_answer(raw_text: str) -> AgentFinalAnswer:
+def _parse_final_answer(
+    raw_text: str, trace_id: Optional[str] = None
+) -> AgentFinalAnswer:
     """
     Same fence-stripping / parse / validate / fallback shape as
     llm.analysis_core.parse_and_validate, applied to the agent's
     smaller final-answer schema instead of AmbiguousItemAnalysis.
+
+    Logs raw_text on failure -- a real live-run incident showed a
+    parse error ("Expecting value: line 1 column 1 (char 0)") with no
+    way to tell what the model actually returned, because the old
+    version only logged the exception, never the text that caused it.
     """
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
@@ -171,7 +178,10 @@ def _parse_final_answer(raw_text: str) -> AgentFinalAnswer:
         payload = json.loads(cleaned)
         return AgentFinalAnswer(**payload)
     except (json.JSONDecodeError, ValidationError) as exc:
-        logger.error("Failed to parse agent final answer | error=%s", exc)
+        logger.error(
+            "Failed to parse agent final answer | trace_id=%s error=%s raw_text=%r",
+            trace_id, exc, raw_text,
+        )
         return AgentFinalAnswer(
             summary="The agent did not return a valid final answer.",
             manufacturer_identified=None,
@@ -234,9 +244,22 @@ def run_supplier_search_agent(
 
         if response.stop_reason != "tool_use":
             final_text = next(
-                (b.text for b in response.content if b.type == "text"), ""
+                (b.text for b in response.content if b.type == "text"), None
             )
-            final_answer = _parse_final_answer(final_text)
+            if final_text is None:
+                # This is the exact gap a live incident just exposed:
+                # no text block at all in the final turn. Logging
+                # which block types WERE present is what would have
+                # told us why, instead of just seeing an empty-string
+                # JSON error with no further clues.
+                block_types = [b.type for b in response.content]
+                logger.warning(
+                    "No text block in final response | trace_id=%s "
+                    "stop_reason=%s content_block_types=%s",
+                    trace_id, response.stop_reason, block_types,
+                )
+                final_text = ""
+            final_answer = _parse_final_answer(final_text, trace_id=trace_id)
 
             return AgentSupplierSearchResult(
                 material_number=material_number,
