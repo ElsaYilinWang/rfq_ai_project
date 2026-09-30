@@ -1,19 +1,15 @@
 
-# RFQ AI — Automated Procurement Workflow System
+# RFQ AI — AI-Assisted Procurement Workflow System
 
 > *An AI-assisted system that transforms a repetitive, manual procurement process into a semi-automated pipeline — where the human only makes the decisions that matter.*
 
+An AI-assisted workflow automation project for industrial RFQ processing. It parses RFQ-style input, validates key procurement fields, discovers likely suppliers from a local knowledge base, generates supplier-specific RFQ email drafts, and keeps the human in control before any supplier communication is sent.
+
 ---
-
-# RFQ AI — AI-Assisted Procurement Workflow System
-
-*An AI-assisted workflow automation project for industrial RFQ processing.
-
-This project parses RFQ-style input, validates key procurement fields, discovers likely suppliers from a local knowledge base, generates supplier-specific RFQ email drafts, and keeps the human in control before any supplier communication is sent.*
 
 ## Project Status / Data Disclaimer
 
-This is a private portfolio project inspired by real procurement workflow experience. It was built independently and uses mock or sanitized RFQ-style data for demonstration.
+This is a public portfolio project inspired by real procurement workflow experience. It was built independently and uses mock or sanitized RFQ-style data for demonstration.
 
 It was not deployed at DECI and does not contain confidential company, client, supplier, pricing, or RFQ data.
 
@@ -26,7 +22,7 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
 - API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
 - Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
-- Automated testing with pytest (55 tests), an evaluation harness, and CI on every push
+- Automated testing with pytest (56 tests), an evaluation harness, and CI on every push
 - A lightweight SQLAlchemy repository layer over a supplier database
 - A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
@@ -53,7 +49,7 @@ Think of it like a QC analyst's lab software: the system runs the process automa
 
 ## Why I Built This
 
-I spent one year as a Procurement Engineer handling MRO (Maintenance, Repair & Operations) spare parts for Gulf and Middle East heavy industrial clients. The work involved real domain expertise — understanding manufacturers, supply chains, lead times, compliance requirements — but much of the execution was repetitive.
+I spent one year as a Procurement Engineer handling MRO (Maintenance, Repair & Operations) spare parts for GCC heavy industrial clients. The work involved real domain expertise — understanding manufacturers, supply chains, lead times, compliance requirements — but much of the execution was repetitive.
 
 I built this project for three reasons:
 
@@ -65,7 +61,7 @@ I built this project for three reasons:
 
 ## Production-Oriented Workflow Design
 
-This project is a private portfolio implementation using mock and sanitized RFQ-style data. It was not deployed in a production environment, but it was designed around production-oriented workflow concerns: evaluation, observability, permission control, traceability, and human review.
+This project is a portfolio implementation using mock and sanitized RFQ-style data. It was not deployed in a production environment, but it was designed around production-oriented workflow concerns: evaluation, observability, permission control, traceability, and human review.
 
 The goal is not to build a fully autonomous procurement agent. The goal is to demonstrate how an AI-assisted workflow can support procurement engineers while keeping high-risk decisions under human control.
 
@@ -137,12 +133,12 @@ The prompt/validation logic lives in a provider-neutral core (`llm/analysis_core
 
 ```
                           mock    claude
-field accuracy             41%      100%
+field accuracy             46%       91%
 total cost               $0.0000   $0.0081
 median latency               0ms     1.93s
 ```
 
-This is not run in CI — it makes real, paid API calls. Run it by hand with `python eval/compare_analyzers.py`. The 100% figure was reached after two real fixes to a real disagreement — a mislabelled case and a prompt gap around product-line designations like "S7-1200" — both recorded in the case notes and the prompt version history, not silently smoothed over.
+This is not run in CI — it makes real, paid API calls. Run it by hand with `python eval/compare_analyzers.py`. Disagreements are recorded rather than smoothed over: the case notes (`eval/analyzer_cases.json`) and the prompt version history document a mislabelled case and a prompt gap around product-line designations like "S7-1200" that surfaced during this evaluation.
 
 ### The supplier-search agent
 
@@ -320,6 +316,8 @@ A second, higher-level retrieval evaluation, distinct from the mechanism-level t
 
 The project uses logging and JSON outputs to make workflow behavior inspectable. In a production enterprise workflow, observability is important because silent failures can create operational risk.
 
+**What is implemented today:** rotating file loggers in Modules 1 and 3, and — for the API and agent — a `trace_id` system with structured per-call logging to `llm_calls.log` (see "Tracing a suggestion to its model call" below). **What follows is the target design** for a production workflow, not a description of everything already built.
+
 For each workflow run, the system should ideally record:
 
 * Input file name or RFQ identifier
@@ -463,6 +461,8 @@ This makes the workflow easier to trust. The user is not asked to blindly accept
 
 The workflow can improve over time through human feedback.
 
+*Status: design intent. The only part implemented so far is Module 2's write-back of human supplier decisions into the knowledge base; structured capture of the other feedback below is not built yet.*
+
 Examples of useful feedback include:
 
 * User accepts a supplier recommendation
@@ -572,7 +572,7 @@ This principle held even once Docker and Kubernetes entered the picture (Phases 
 │  • Groups line items by manufacturer                       │
 │  • Matches suppliers to each manufacturer group            │
 │  • Generates per-supplier email drafts:                    │
-│    - Subject: DECI RFQ {ref} {client} - {MFR}             │
+│    - Subject: <Company> RFQ {ref} {client} - {MFR}        │
 │    - Salutation: Dear Mike / Dear Sir/Madam (auto-detect)  │
 │    - Body: fixed template + line item table                │
 │    - Signature: Ireland or Saudi (based on supplier country)│
@@ -724,45 +724,39 @@ The same five-endpoint checklist from Docker, re-run against the cluster through
 
 ```
 rfq_ai_project/
-├── parser/                    # Module 1 — RFQ Parser
-│   ├── parser.py              # RFQParser class
-│   ├── validators.py          # field validation rules
-│   ├── schemas.py             # data structures
-│   └── logger.py              # rotating file logger
+├── parser/                     # Module 1 — RFQ Parser
+│   ├── parser.py               # RFQParser class
+│   ├── validators.py           # field validation rules
+│   ├── schemas.py              # data structures
+│   └── logger.py               # rotating file logger
 │
-├── supplier_discovery.py      # Module 2 — core DB operations
-├── ai_supplier_suggestion.py  # Module 2 — AI suggestion layer
-├── cli.py                     # Module 2 — interactive CLI
+├── supplier_discovery.py       # Module 2 — core DB operations
+├── ai_supplier_suggestion.py   # Module 2 — AI suggestion layer
+├── cli.py                      # Module 2 — interactive CLI
 │
-├── email_distribution/        # Module 3 — Email Pipeline
-│   ├── rfq_grouper.py         # group line items by manufacturer
-│   ├── supplier_matcher.py    # match suppliers from DB to groups
-│   ├── email_composer.py      # generate email content
-│   ├── outlook_sender.py      # orchestrate sending + audit trail
-│   ├── schemas.py             # Module 3 data structures
-│   └── logger.py              # rotating file logger
+├── email_distribution/         # Module 3 — Email Pipeline
+│   ├── rfq_grouper.py          # group line items by manufacturer
+│   ├── supplier_matcher.py     # match suppliers from DB to groups
+│   ├── email_composer.py       # generate email content
+│   ├── outlook_sender.py       # orchestrate sending + audit trail
+│   ├── schemas.py              # Module 3 data structures
+│   └── logger.py               # rotating file logger
 │
-├── email_sender/              # Email provider abstraction
-│   ├── base.py                # abstract interface
-│   ├── outlook.py             # Outlook implementation (win32com)
-│   └── mock.py                # mock for testing
+├── email_sender/               # Email provider abstraction
+│   ├── base.py                 # abstract interface
+│   ├── outlook.py              # Outlook implementation (win32com)
+│   └── mock.py                 # mock for testing
 │
-├── tests/                     # full test suite — 45/45 passing
-├── mock_data/                 # mock inputs for testing
-├── knowledge_base/            # suppliers.db (gitignored)
-├── output/                    # JSON outputs (gitignored)
-├── logs/                      # rotating logs (gitignored)
-└── main.py                    # interactive pipeline entry point
-├── api/                       # FastAPI review API layer
-│   ├── main.py                # API entry point, health check, all routes
-│   ├── schemas.py             # Pydantic API response models
-│   ├── converters.py          # maps parser dataclasses to API responses
-│   └── routes/                # placeholder for future route organization
+├── api/                        # FastAPI review API layer
+│   ├── main.py                 # API entry point, health check, all routes
+│   ├── schemas.py              # Pydantic API response models
+│   ├── converters.py           # maps parser dataclasses to API responses
+│   └── routes/                 # placeholder for future route organization
 │
-├── frontend/                  # lightweight browser review dashboard
-│   ├── index.html             # page structure
-│   ├── app.js                 # calls FastAPI endpoint using fetch()
-│   └── style.css              # simple dashboard styling
+├── frontend/                   # lightweight browser review dashboard
+│   ├── index.html              # page structure
+│   ├── app.js                  # calls FastAPI endpoints using fetch()
+│   └── style.css               # simple dashboard styling
 │
 ├── llm/                        # structured item analysis
 │   ├── schemas.py              # AmbiguousItemAnalysis, CallMetrics
@@ -770,10 +764,10 @@ rfq_ai_project/
 │   ├── analysis_core.py        # provider-neutral prompt/validation
 │   └── claude_analyzer.py      # thin Anthropic adapter over the core
 │
-├── retrieval/                   # Phase 14 semantic supplier retrieval
-│   ├── schemas.py                # HistoricalItem, SemanticMatch
-│   ├── corpus.py                 # 11-record mock historical corpus, incl. near-duplicate pairs
-│   └── semantic_search.py        # local sentence-transformers embeddings + cosine similarity
+├── retrieval/                  # Phase 14 semantic supplier retrieval
+│   ├── schemas.py              # HistoricalItem, SemanticMatch
+│   ├── corpus.py               # 11-record mock historical corpus, incl. near-duplicate pairs
+│   └── semantic_search.py      # local sentence-transformers embeddings + cosine similarity
 │
 ├── agent/                      # Phase 13/14c multi-step supplier-search agent
 │   ├── tools.py                # 5 tools + seeded mock supplier DB — no send-email tool
@@ -781,32 +775,40 @@ rfq_ai_project/
 │   └── supplier_agent.py       # the loop: dispatch, iteration cap, tracing
 │
 ├── db/                         # Phase 9 SQLAlchemy repository layer
-│   ├── models.py                # Supplier model
-│   ├── session.py               # engine/session factory
+│   ├── models.py               # Supplier model
+│   ├── session.py              # engine/session factory
 │   └── repositories/
 │       └── supplier_repository.py
 │
 ├── eval/                       # evaluation harnesses
-│   ├── test_cases.json          # workflow-level (3 cases)
-│   ├── run_eval.py              # workflow-level, runs in CI
-│   ├── analyzer_cases.json      # LLM analyzer (11 cases)
-│   └── compare_analyzers.py     # mock vs. real, accuracy/cost/latency — not in CI
+│   ├── test_cases.json         # workflow-level (3 cases)
+│   ├── run_eval.py             # workflow-level, runs in CI
+│   ├── analyzer_cases.json     # LLM analyzer (11 cases)
+│   ├── compare_analyzers.py    # mock vs. real, accuracy/cost/latency — not in CI
+│   └── retrieval_hit_rate.py   # semantic retrieval hit rate (9 cases) — free, local, not in CI
 │
-├── tests/                      # pytest suite — 55/55 passing (8 need real network, see How to Run)
-├── conftest.py                  # project-root import path fix; forces mock analyzer in tests
+├── tests/                      # pytest suite (56 tests; 8 need real network, see How to Run)
+│                               #   + original Module 1–3 test scripts (45 checks)
+├── conftest.py                 # project-root import path fix; forces mock analyzer in tests
 ├── scripts/
-│   ├── manual_agent_test.py     # live, real-cost agent test — not run by pytest or CI
+│   ├── manual_agent_test.py    # live, real-cost agent test — not run by pytest or CI
 │   └── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
 │
-├── Dockerfile                   # Phase 15 container build — CPU-only torch, model baked in at build time
-├── .dockerignore                # excludes .env, venv/, caches, generated reports from the build context
+├── mock_data/                  # mock inputs for testing
+├── knowledge_base/             # suppliers.db (gitignored)
+├── output/                     # JSON outputs (gitignored)
+├── logs/                       # rotating logs (gitignored)
+├── main.py                     # interactive pipeline entry point
 │
-├── k8s/                          # Phase 16 Kubernetes manifests
-│   ├── deployment.yaml            # 1 replica, imagePullPolicy: Never, /health readiness+liveness probes
-│   └── service.yaml               # ClusterIP, reached via kubectl port-forward
+├── Dockerfile                  # Phase 15 container build — CPU-only torch, model baked in at build time
+├── .dockerignore               # excludes .env, venv/, caches, generated reports from the build context
+│
+├── k8s/                        # Phase 16 Kubernetes manifests
+│   ├── deployment.yaml         # 1 replica, imagePullPolicy: Never, /health readiness+liveness probes
+│   └── service.yaml            # ClusterIP, reached via kubectl port-forward
 │
 └── .github/workflows/
-    └── eval.yml                 # runs eval/run_eval.py AND docker-build (build + /health smoke test) on every push
+    └── eval.yml                # runs eval/run_eval.py AND docker-build (build + /health smoke test) on every push
 ```
 
 ---
@@ -841,7 +843,7 @@ Then open:
 - http://127.0.0.1:8000/health
 - http://127.0.0.1:8000/rfqs/sample
 
-With the server running, open `frontend/index.html` for the review dashboard, or `http://127.0.0.1:8000/docs` for interactive API docs — including `GET /rfqs/sample/items/{line_item}/agent-search`, which makes real, paid Sonnet 5 calls (see "AI-Assisted Item Analysis and Supplier-Search Agent" below before trying it).
+With the server running, open `frontend/index.html` for the review dashboard, or `http://127.0.0.1:8000/docs` for interactive API docs — including `GET /rfqs/sample/items/{line_item}/agent-search`, which makes real, paid Sonnet 5 calls (see "AI-Assisted Item Analysis and Supplier-Search Agent" above before trying it).
 
 ### Run with Docker
 
@@ -862,7 +864,7 @@ kubectl apply -f k8s/
 kubectl port-forward svc/rfq-ai-api 8000:8000
 ```
 
-Same endpoints as above, same behavior — the whole point of this phase was proving that. The Secret is created directly in the cluster, never written to a committed file (see "Kubernetes" below). After changing code: rebuild the image, `kind load` it again, then `kubectl rollout restart deployment rfq-ai-api` to redeploy without deleting anything by hand.
+Same endpoints as above, same behavior — the whole point of this phase was proving that. The Secret is created directly in the cluster, never written to a committed file (see "Kubernetes" above). After changing code: rebuild the image, `kind load` it again, then `kubectl rollout restart deployment rfq-ai-api` to redeploy without deleting anything by hand.
 
 ### Run the automated test suite (pytest)
 
@@ -870,7 +872,7 @@ Same endpoints as above, same behavior — the whole point of this phase was pro
 pytest -v
 ```
 
-55 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, and semantic retrieval. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
+56 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, and semantic retrieval. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
 
 ### Run the evaluation harness
 
@@ -884,7 +886,7 @@ python eval/run_eval.py
 python eval/compare_analyzers.py
 ```
 
-Compares the mock and real analyzers on an 11-case labelled dataset for field accuracy, cost, and latency — see "AI-Assisted Item Analysis and Supplier-Search Agent" below.
+Compares the mock and real analyzers on an 11-case labelled dataset for field accuracy, cost, and latency — see "AI-Assisted Item Analysis and Supplier-Search Agent" above.
 
 ### Run the semantic retrieval diagnostic
 
@@ -908,6 +910,18 @@ python tests/test_outlook_sender.py
 ---
 
 ## Test Results
+
+### pytest suite
+
+```bash
+pytest -v
+```
+
+**56 tests passing** across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer (mocked calls), the agent loop and its tools, and semantic retrieval. See "Run the automated test suite (pytest)" above for what needs network access.
+
+### Original module test scripts (Modules 1–3)
+
+Each of these is also run individually with `python tests/test_<name>.py`:
 
 ```
 Module 1 — RFQ Parser:          8/8  ✓
@@ -943,7 +957,7 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 
 ## Current Limitations
 
-- The FastAPI layer currently exposes sample RFQ review, line-item, and supplier-candidate endpoints backed by mock data — not the full Excel upload workflow.
+- The FastAPI layer exposes sample-RFQ endpoints (review, line items, supplier candidates, agent search) rather than the full Excel upload workflow. The sample RFQ and the historical supplier matches are mock data; the LLM suggestions, semantic fallback, and agent calls are real.
 - The frontend is a lightweight local review dashboard, not a deployed production web application.
 - The historical/manufacturer-match half of supplier candidates is still mock data, not connected to the real SQLite supplier knowledge base — the semantic-fallback half is real as of Phase 14, but searches a small separate mock corpus, not the real historical database.
 - The semantic retrieval corpus is a small (11-record) mock dataset that doesn't cover every equipment category — e.g. it has no heat-exchanger-specific entries, so that kind of query can only ever find a modestly-similar adjacent match (pump seals), never a strong one.
@@ -983,12 +997,12 @@ Procurement Engineer → AI Workflow/Automation Engineer
 
 - MEng Industrial Engineering & Operations Research — UC Berkeley
 - MSc International Software Development (First Class Honours) — University of Limerick
-- 2+ years SaaS application support (Navis, Oakland CA)
-- 2+ years MRO procurement engineering (DECI Ltd, Limerick Ireland)
+- 2+ years SaaS application support (Kaleris, formerly Navis — Feb 2021 – May 2023, United States)
+- 1 year MRO procurement engineering (DECI Ltd, Limerick, Ireland — Jun 2025 – Jun 2026)
 
 This project sits at the intersection of both worlds: deep procurement domain knowledge combined with software engineering and AI workflow design.
 
 
 ---
 
-*Built with Python, SQLite, OpenAI API, win32com, and a lot of real procurement experience.*
+*Built with Python, FastAPI, Pydantic, SQLAlchemy, SQLite, the Anthropic Claude API, sentence-transformers, Docker, Kubernetes (kind), win32com, and a lot of real procurement experience.*
