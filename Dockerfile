@@ -20,15 +20,15 @@ WORKDIR /app
 # because an unrelated .py file changed.
 COPY requirements.txt .
 
-# Install the CPU-only build of PyTorch FIRST, from PyTorch's own
-# dedicated CPU wheel index. Without this, sentence-transformers'
-# dependency on torch resolves to the default PyPI wheel, which
-# bundles the full NVIDIA CUDA runtime — several extra gigabytes this
-# project has no use for. This container has no GPU, and a similarity
-# search over an 11-record corpus wouldn't benefit from one even if
-# it did. Installing the CPU build here first means the next line
-# finds torch already satisfied and never reaches for the CUDA one.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# torchvision must come from the SAME index as torch, not the default
+# PyPI one. docling depends on torchvision separately, and the
+# regular PyPI torchvision wheel is built against CUDA-capable torch
+# -- installed next to our CPU-only torch, their compiled internals
+# don't actually match even though the version numbers look
+# compatible. Confirmed via a real CI failure:
+# "RuntimeError: operator torchvision::nms does not exist" --
+# exactly the documented symptom of this exact mismatch.
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Bake the retrieval embedding model into the image at build time,
