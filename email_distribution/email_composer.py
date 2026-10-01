@@ -1,10 +1,14 @@
 from typing import List, Optional
 from email_distribution.schemas import LineItemRow, MFRGroup, MatchedSupplier, EmailDraft
 
+import os
+
+COMPANY_NAME = os.getenv("COMPANY_NAME", "Acme Corp")
+
 
 def generate_subject(internal_reference: str, client_code: str, manufacturer: str) -> str:
     
-    subject = f"DECI RFQ {internal_reference} {client_code}"
+    subject = f"{COMPANY_NAME} RFQ {internal_reference} {client_code}"
     if manufacturer:
         subject = subject + f" - {manufacturer}"
     return subject
@@ -43,14 +47,13 @@ def select_signature(country: Optional[str] = None) -> str:
     GCC_COUNTRIES = ["UAE", "Qatar", "Bahrain", "KSA", "Saudi Arabia", "Oman"]
     IRELAND_SIGNATURE = """Kind regards,
         Elsa Wang
-        Procurement Engineer
-        Unit 1 Enterprise Centre, Childers Road, Ballysimon, Limerick, V94 HX70, Ireland."""
+        XXX Engineer
+        Address, eircode, Ireland."""
 
     SAUDI_SIGNATURE = """Kind regards,
         Elsa Wang
-        Procurement Engineer
-        Unit No: 4608, Additional No: 8292, Building No: 3141, 
-        Anas Ibn Malik Street, Al Malqa District, Riyadh, Kingdom of Saudi Arabia."""
+        XXX Engineer 
+        Address, zipcode, Saudi Arabia."""
     
     if country in GCC_COUNTRIES:
         return SAUDI_SIGNATURE
