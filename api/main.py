@@ -1,9 +1,12 @@
 # api/main.py
 
+import os
+import tempfile
 import logging
 import uuid
 
-from fastapi import FastAPI, HTTPException
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from parser.schemas import (
@@ -18,7 +21,10 @@ from api.converters import (
     parsed_rfq_to_items_response,
     build_supplier_candidates_response,
 )
-from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse
+from api.schemas import RFQParseResponse, RFQItemsResponse, SupplierCandidatesResponse, QuotationExtractionResponse
+from quotation_intake.claude_extractor import extract_quotation_with_claude
+from quotation_intake.docling_extractor import extract_raw_text
+
 from llm.claude_analyzer import get_analyzer
 from agent.supplier_agent import run_supplier_search_agent
 from agent.schemas import AgentSupplierSearchResult
@@ -183,3 +189,37 @@ def get_sample_rfq_item_agent_search(line_item: int):
         ),
         trace_id=trace_id,
     )
+
+
+@app.post("/rfqs/sample/quotations", response_model=QuotationExtractionResponse)
+def upload_sample_rfq_quotation(file: UploadFile = File(...)):
+    """
+    Accepts a supplier's quotation document, extracts it with Docling,
+    then structures it into SupplierQuotation with Claude.
+
+    A genuinely unreadable file (Docling itself can't open it) is a
+    422 -- broken input, not ambiguous content. A readable document
+    Claude can't confidently structure still returns 200, with flags
+    set and human_review_required True -- same degrade-gracefully
+    pattern as every other AI-touched endpoint in this project.
+    """
+    trace_id = f"quotation_{uuid.uuid4().hex[:12]}"
+
+    suffix = os.path.splitext(file.filename or "")[1] or ".pdf"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(file.file.read())
+        tmp_path = tmp.name
+
+    try:
+        raw_text = extract_raw_text(tmp_path)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not read document: {exc}",
+        )
+    finally:
+        os.unlink(tmp_path)
+
+    quotation, _metrics = extract_quotation_with_claude(raw_text, trace_id=trace_id)
+
+    return QuotationExtractionResponse(quotation=quotation, trace_id=trace_id)

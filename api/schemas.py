@@ -3,6 +3,7 @@
 from llm.schemas import AmbiguousItemAnalysis
 from pydantic import BaseModel
 from typing import List, Optional
+from quotation_intake.schemas import SupplierQuotation
 
 
 class ValidationWarning(BaseModel):
@@ -62,3 +63,8 @@ class SupplierCandidatesResponse(BaseModel):
     rfq_number: str
     supplier_candidates: List[SupplierCandidateResponse]
     next_action: str
+
+
+class QuotationExtractionResponse(BaseModel):
+    quotation: SupplierQuotation
+    trace_id: Optional[str] = None
