@@ -1,14 +1,23 @@
 FROM python:3.11-slim
 
-# PyTorch (pulled in transitively by sentence-transformers) links
-# against libgomp, the GNU OpenMP runtime. python:slim doesn't ship
-# it, and importing torch fails with:
-#   ImportError: libgomp.so.1: cannot open shared object file
-# This is a widely-documented issue on slim Debian base images (hits
-# PaddlePaddle, LightGBM, and others the same way) -- fixed here
-# proactively rather than discovered later via a cryptic crash.
+# libgomp1 -- PyTorch's OpenMP runtime, missing on slim Debian.
+# libgl1, libglib2.0-0, libxcb1, libsm6, libxext6, libxrender1 --
+# opencv-python (pulled in transitively by docling-slim[standard] ->
+# rapidocr) dynamically links against X11/graphics libraries at
+# import time even though this container never displays anything.
+# Confirmed via a real container failure: "libxcb.so.1: cannot open
+# shared object file" the first time the quotation-upload endpoint
+# actually ran inside Docker -- this entire set is installed together
+# since this exact error is well-documented to surface one missing
+# library at a time across rebuilds if fixed incrementally.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
+    libgl1 \
+    libglib2.0-0 \
+    libxcb1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
