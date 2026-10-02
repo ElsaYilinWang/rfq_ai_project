@@ -1,0 +1,296 @@
+{
+  "cases_fully_correct": 8,
+  "total_cases": 8,
+  "overall_field_accuracy": 1.0,
+  "field_accuracy": {
+    "supplier_name": 1.0,
+    "part_number": 1.0,
+    "manufacturer": 1.0,
+    "unit_price": 1.0,
+    "currency": 1.0,
+    "quantity": 1.0,
+    "uom": 1.0,
+    "total_price": 1.0,
+    "certificates": 1.0,
+    "minimum_order_quantity": 1.0
+  },
+  "total_cost_usd": 0.0133,
+  "results": [
+    {
+      "case_id": "clean_baseline",
+      "note": "Already-verified clean PDF (prose/colon style) -- baseline reference point.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "supplier_name": {
+          "expected": "Mock Flowserve Supplier",
+          "actual": "Mock Flowserve Supplier",
+          "correct": true
+        },
+        "part_number": {
+          "expected": "FLS-MSK-200",
+          "actual": "FLS-MSK-200",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "Flowserve",
+          "actual": "Flowserve",
+          "correct": true
+        },
+        "unit_price": {
+          "expected": 450.0,
+          "actual": 450.0,
+          "correct": true
+        },
+        "currency": {
+          "expected": "USD",
+          "actual": "USD",
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001989
+    },
+    {
+      "case_id": "table_format",
+      "note": "Table-style layout instead of prose -- many real quotes use an actual table; never tested before this.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "6205-2RS",
+          "actual": "6205-2RS",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "SKF",
+          "actual": "SKF",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 15,
+          "actual": 15,
+          "correct": true
+        },
+        "uom": {
+          "expected": "EA",
+          "actual": "EA",
+          "correct": true
+        },
+        "unit_price": {
+          "expected": 8.5,
+          "actual": 8.5,
+          "correct": true
+        },
+        "currency": {
+          "expected": "EUR",
+          "actual": "EUR",
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001511
+    },
+    {
+      "case_id": "docx_format",
+      "note": "DOCX instead of PDF -- Docling supports it, never actually tested in this project.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "LC1D25",
+          "actual": "LC1D25",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "Schneider Electric",
+          "actual": "Schneider Electric",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 12,
+          "actual": 12,
+          "correct": true
+        },
+        "unit_price": {
+          "expected": 42.0,
+          "actual": 42.0,
+          "correct": true
+        },
+        "currency": {
+          "expected": "EUR",
+          "actual": "EUR",
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001643
+    },
+    {
+      "case_id": "total_price_only",
+      "note": "Document states TOTAL price for the full quantity, not unit price. Tests the exact unit-vs-total distinction flagged as a real-world gotcha during schema design. unit_price must stay null, not get computed by dividing.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "CB-10A",
+          "actual": "CB-10A",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "ABB",
+          "actual": "ABB",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 50,
+          "actual": 50,
+          "correct": true
+        },
+        "total_price": {
+          "expected": 625.0,
+          "actual": 625.0,
+          "correct": true
+        },
+        "unit_price": {
+          "expected": null,
+          "actual": null,
+          "correct": true
+        },
+        "currency": {
+          "expected": "EUR",
+          "actual": "EUR",
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001583
+    },
+    {
+      "case_id": "certificate_at_cost",
+      "note": "Certificate explicitly available at an additional cost -- the exact scenario CertificateMention's status/additional_cost fields were built for, never tested with a real document before this.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "JC-HT-500",
+          "actual": "JC-HT-500",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "John Crane",
+          "actual": "John Crane",
+          "correct": true
+        },
+        "certificates": {
+          "expected": [
+            {
+              "name": "Material Test Certificate 3.1",
+              "status": "available_at_cost",
+              "additional_cost": 75.0
+            }
+          ],
+          "actual": [
+            {
+              "name": "Material Test Certificate 3.1",
+              "status": "available_at_cost",
+              "additional_cost": 75.0
+            }
+          ],
+          "correct": true
+        }
+      },
+      "cost_usd": 0.00183
+    },
+    {
+      "case_id": "no_certificates",
+      "note": "Document never mentions certificates at all. Correct behavior is an empty list, not a hallucinated certificate.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "DSBC-50-200",
+          "actual": "DSBC-50-200",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "Festo",
+          "actual": "Festo",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 10,
+          "actual": 10,
+          "correct": true
+        },
+        "unit_price": {
+          "expected": 95.0,
+          "actual": 95.0,
+          "correct": true
+        },
+        "certificates": {
+          "expected": [],
+          "actual": [],
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001626
+    },
+    {
+      "case_id": "moq_differs_from_quantity",
+      "note": "Quoted quantity (5) and minimum order quantity (20) are different numbers in the same document. Tests that quantity and MOQ don't get confused with each other.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "MBS3000-16",
+          "actual": "MBS3000-16",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "Danfoss",
+          "actual": "Danfoss",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 5,
+          "actual": 5,
+          "correct": true
+        },
+        "minimum_order_quantity": {
+          "expected": 20,
+          "actual": 20,
+          "correct": true
+        },
+        "unit_price": {
+          "expected": 140.0,
+          "actual": 140.0,
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001657
+    },
+    {
+      "case_id": "ambiguous_no_price",
+      "note": "Genuinely incomplete document -- no price stated at all, just 'contact sales'. Correct behavior is null price fields, not a guessed number. The one deliberately hard case in this set.",
+      "all_checked_fields_correct": true,
+      "fields": {
+        "part_number": {
+          "expected": "LC1D25",
+          "actual": "LC1D25",
+          "correct": true
+        },
+        "manufacturer": {
+          "expected": "Schneider Electric",
+          "actual": "Schneider Electric",
+          "correct": true
+        },
+        "quantity": {
+          "expected": 8,
+          "actual": 8,
+          "correct": true
+        },
+        "unit_price": {
+          "expected": null,
+          "actual": null,
+          "correct": true
+        },
+        "total_price": {
+          "expected": null,
+          "actual": null,
+          "correct": true
+        }
+      },
+      "cost_usd": 0.001478
+    }
+  ]
+}

@@ -60,7 +60,12 @@ def build_prompt(raw_text: str) -> str:
     return (
         "You are extracting structured data from a supplier's quotation document. "
         "Extract ONLY the following fields, exactly as stated in the text below. "
-        "Never guess, compute, or infer a value that is not actually stated. "
+        "Never guess, compute, or infer a value that is not actually stated -- "
+        "this specifically includes NEVER computing unit_price by dividing "
+        "total_price by quantity, or total_price by multiplying unit_price by "
+        "quantity, even though the arithmetic is simple. If only one of "
+        "unit_price or total_price is explicitly stated in the document, "
+        "leave the other one null. "
         "Leave any field null if the document does not state it.\n\n"
         f"Fields to extract:\n{_SCHEMA_FIELDS}\n\n"
         "Respond with ONLY a single JSON object matching these fields -- no "

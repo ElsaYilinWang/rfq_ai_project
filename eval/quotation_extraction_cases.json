@@ -1,0 +1,100 @@
+[
+  {
+    "case_id": "clean_baseline",
+    "file": "eval/quotation_fixtures/case1_clean_baseline.pdf",
+    "note": "Already-verified clean PDF (prose/colon style) -- baseline reference point.",
+    "expected": {
+      "supplier_name": "Mock Flowserve Supplier",
+      "part_number": "FLS-MSK-200",
+      "manufacturer": "Flowserve",
+      "unit_price": 450.0,
+      "currency": "USD"
+    }
+  },
+  {
+    "case_id": "table_format",
+    "file": "eval/quotation_fixtures/case2_table_format.pdf",
+    "note": "Table-style layout instead of prose -- many real quotes use an actual table; never tested before this.",
+    "expected": {
+      "part_number": "6205-2RS",
+      "manufacturer": "SKF",
+      "quantity": 15,
+      "uom": "EA",
+      "unit_price": 8.50,
+      "currency": "EUR"
+    }
+  },
+  {
+    "case_id": "docx_format",
+    "file": "eval/quotation_fixtures/case3_docx_format.docx",
+    "note": "DOCX instead of PDF -- Docling supports it, never actually tested in this project.",
+    "expected": {
+      "part_number": "LC1D25",
+      "manufacturer": "Schneider Electric",
+      "quantity": 12,
+      "unit_price": 42.0,
+      "currency": "EUR"
+    }
+  },
+  {
+    "case_id": "total_price_only",
+    "file": "eval/quotation_fixtures/case4_total_price_only.pdf",
+    "note": "Document states TOTAL price for the full quantity, not unit price. Tests the exact unit-vs-total distinction flagged as a real-world gotcha during schema design. unit_price must stay null, not get computed by dividing.",
+    "expected": {
+      "part_number": "CB-10A",
+      "manufacturer": "ABB",
+      "quantity": 50,
+      "total_price": 625.0,
+      "unit_price": null,
+      "currency": "EUR"
+    }
+  },
+  {
+    "case_id": "certificate_at_cost",
+    "file": "eval/quotation_fixtures/case5_certificate_at_cost.pdf",
+    "note": "Certificate explicitly available at an additional cost -- the exact scenario CertificateMention's status/additional_cost fields were built for, never tested with a real document before this.",
+    "expected": {
+      "part_number": "JC-HT-500",
+      "manufacturer": "John Crane",
+      "certificates": [
+        {"name": "Material Test Certificate 3.1", "status": "available_at_cost", "additional_cost": 75.0}
+      ]
+    }
+  },
+  {
+    "case_id": "no_certificates",
+    "file": "eval/quotation_fixtures/case6_no_certificates.pdf",
+    "note": "Document never mentions certificates at all. Correct behavior is an empty list, not a hallucinated certificate.",
+    "expected": {
+      "part_number": "DSBC-50-200",
+      "manufacturer": "Festo",
+      "quantity": 10,
+      "unit_price": 95.0,
+      "certificates": []
+    }
+  },
+  {
+    "case_id": "moq_differs_from_quantity",
+    "file": "eval/quotation_fixtures/case7_moq.pdf",
+    "note": "Quoted quantity (5) and minimum order quantity (20) are different numbers in the same document. Tests that quantity and MOQ don't get confused with each other.",
+    "expected": {
+      "part_number": "MBS3000-16",
+      "manufacturer": "Danfoss",
+      "quantity": 5,
+      "minimum_order_quantity": 20,
+      "unit_price": 140.0
+    }
+  },
+  {
+    "case_id": "ambiguous_no_price",
+    "file": "eval/quotation_fixtures/case8_ambiguous_no_price.pdf",
+    "note": "Genuinely incomplete document -- no price stated at all, just 'contact sales'. Correct behavior is null price fields, not a guessed number. The one deliberately hard case in this set.",
+    "expected": {
+      "part_number": "LC1D25",
+      "manufacturer": "Schneider Electric",
+      "quantity": 8,
+      "unit_price": null,
+      "total_price": null
+    }
+  }
+]
