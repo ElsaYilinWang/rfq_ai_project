@@ -11,7 +11,7 @@ An AI-assisted workflow automation project for industrial RFQ processing. It par
 
 This is a public portfolio project inspired by real procurement workflow experience. It was built independently and uses mock or sanitized RFQ-style data for demonstration.
 
-It was not deployed at DECI and does not contain confidential company, client, supplier, pricing, or RFQ data.
+It was not deployed at DECI and does not contain confidential company, client, supplier, pricing, or RFQ data. The email-generation module's company name is a configurable environment variable (`COMPANY_NAME`), not a hardcoded employer name, for the same reason.
 
 ## What This Demonstrates
 
@@ -22,13 +22,14 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
 - API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
 - Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
-- Automated testing with pytest (56 tests), an evaluation harness, and CI on every push
+- Automated testing with pytest (59 tests), an evaluation harness, and CI on every push
 - A lightweight SQLAlchemy repository layer over a supplier database
 - A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
 - Local semantic retrieval (`sentence-transformers`, no API cost) as a calibrated fallback when no manufacturer signal exists at all, wired into both the API and the agent
 - A Docker image with the full dependency stack — including local retrieval — built, debugged, and verified end to end, with CI now building and smoke-testing it on every push
 - A working local Kubernetes deployment (`kind`) — Deployment, Service, and Secret, with health-check probes reusing the same `/health` endpoint Docker's CI already relies on, verified end to end and including a real production-shaped bug found and fixed along the way
+- Supplier quotation document ingestion (PDF, DOCX) via Docling, structured into a validated schema by Claude — the first file-upload endpoint in the API — with measured field-extraction accuracy (8/8 cases, 100%) against a hand-labelled test set, the same rigor applied to every other AI component here
 
 ## What Is This?
 
@@ -208,6 +209,48 @@ The corpus is deliberately not 11 unrelated entries. Three pairs are near-duplic
 
 ---
 
+## Supplier Quotation Ingestion
+
+Every section above handles the OUTBOUND half of the workflow — parsing the RFQ and finding a supplier to contact. This section builds the INBOUND half, for the first time in this project: a supplier's quotation document coming back, in whatever format and however it's formatted.
+
+### Why this needed a different architecture than everything else
+
+Every other AI component in this project is deterministic-first: parsing tries first, the LLM only fills a gap deterministic logic couldn't. Quotation extraction inverts that. A real diagnostic run against a genuine (non-scanned) PDF showed Docling's own text reconstruction collapsing paragraph line breaks ("From: X Date: Y Re: Z" all on one line) and, on a later document, joining words with no space at all ("UnitPrice", "EAUnit"). A supplier's actual document formatting is too unpredictable across different companies' house styles for any fixed regex to survive — so here, the LLM-assisted structuring step (`quotation_intake/`) is the *default* path, not a fallback, and that's a deliberate, tested decision, not an oversight.
+
+### The schema: raw facts only, deliberately separate from comparison
+
+`quotation_intake/schemas.py` defines `SupplierQuotation`, shaped by real procurement detail: price can be quoted per-unit or as a set total; manufacturer and distributor aren't always the same company; a quantity and a minimum order quantity are two different numbers that must not get confused with each other.
+
+The schema captures only what the SUPPLIER'S document itself states — never whether it matches the original RFQ line, and never a unit-of-measure conversion (a "500 SET" quote needs domain knowledge about that specific part's packaging to compare against an RFQ asking for "1000 EA" — that belongs to a deliberately separate comparison module, not yet built). Same single-responsibility principle as `parser/schemas.py` vs. `parser/validators.py`.
+
+Field names are reused verbatim from existing schemas where the same concept already exists (`part_number`, `manufacturer`, `uom`), not renamed, so a future comparison step can line fields up with no translation layer. `flags: List[str]` matches `LineItem`'s pattern, not `SupplierCandidateResponse`'s single `reason: str` — a real quotation can have several independent problems at once (a UOM mismatch *and* a missing certificate *and* a part-number concern), and a list keeps each one separately actionable. `human_review_required: bool = True` is unconditional, the same pattern held by every AI-touched schema in this project.
+
+Certificates are deliberately v0: `CertificateMention` (name, status, additional_cost) only covers what a document can state about itself — included, available at a cost, or not available. Two real scenarios are explicitly out of scope for now, not silently dropped: a document that says nothing about certificates, resolved by a follow-up phone call, and a supplier who doesn't know and never gets back to you. Both are facts from a human process, not from reading a document once, and belong to a separate concern not yet built.
+
+### The pipeline and the new endpoint
+
+`quotation_intake/docling_extractor.py` wraps Docling's conversion (deterministic, no LLM); `quotation_intake/analysis_core.py` holds the provider-neutral prompt and parse/validate/fallback logic (same split as `llm/analysis_core.py` vs. `llm/claude_analyzer.py`); `quotation_intake/claude_extractor.py` is the thin Anthropic adapter, reusing `llm.schemas.CallMetrics` rather than inventing a second metrics schema.
+
+`POST /rfqs/sample/quotations` is the first file-upload endpoint in this API — every other route is a parameterless `GET`. It's a plain synchronous `def` route, not `async def`, despite handling file I/O: Docling's conversion and the Anthropic call are both blocking, and Starlette already dispatches sync routes to a thread pool automatically — the exact mechanism every other route in this project already relies on, so no new async/threading pattern was needed. A genuinely unreadable file (Docling can't open it at all) returns a real `422` — broken input, not ambiguous content. A readable document the model can't confidently structure still returns `200`, flagged and `human_review_required`, the same degrade-gracefully pattern as every other AI-touched endpoint here.
+
+### Four real bugs, found by actually running this, not assumed away
+
+**The `torchvision`/`torch` ABI mismatch.** `docling` depends on `torchvision` separately from the `torch` version already pinned to PyTorch's CPU-only index (see "Why install PyTorch from a separate CPU-only wheel index?" above) — and the regular PyPI `torchvision` wheel is built against CUDA-capable `torch`, not the CPU-only variant actually installed. They looked version-compatible on paper; their compiled internals didn't match. Found via a real CI failure (`RuntimeError: operator torchvision::nms does not exist`), fixed by installing `torchvision` from the *same* CPU index as `torch`, in the same step.
+
+**Missing X11/graphics system libraries.** The first real run of the new endpoint *inside Docker* failed with `libxcb.so.1: cannot open shared object file` — `opencv-python`, pulled in transitively through `docling` → `rapidocr`, dynamically links against X11 libraries at import time even though this container never displays anything. Fixed by extending the Dockerfile's existing `apt-get` step (already installing `libgomp1`) with the complete, well-documented set this class of error is known to need (`libgl1`, `libglib2.0-0`, `libxcb1`, `libsm6`, `libxext6`, `libxrender1`) in one pass, rather than discovering them one at a time across repeated rebuilds.
+
+**A missing `.env` load in the eval script itself.** The first run of `eval/quotation_extraction_eval.py` reported 10% field accuracy — every Claude call had actually failed with an authentication error, and the handful of "correct" fields were coincidental matches on fields that happened to expect `null`. The script was built by copying `eval/retrieval_hit_rate.py`'s shape, which never needed `load_dotenv()` since retrieval makes no API calls at all — `eval/compare_analyzers.py`, which does, already had the right precedent and should have been checked instead. A real reminder that even a test harness needs the same scrutiny as production code.
+
+**A real violation of the "never compute a value" instruction.** Once the API key issue was fixed, one of eight cases failed: a document stating only a total price, for a line item also stating a quantity, came back with a *computed* `unit_price` — the model divided the two numbers despite an explicit prompt instruction not to infer unstated values. Fixed by adding a concrete, named example of the exact mistake to the prompt rather than relying on the general instruction alone; re-run confirmed the fix without disturbing any of the seven cases that already passed.
+
+### Measured, not assumed
+
+`eval/quotation_extraction_eval.py` runs 8 hand-built cases (`eval/quotation_fixtures/`) against the real pipeline — a clean baseline, a column-aligned layout, a DOCX file, the total-vs-unit-price distinction, a certificate quoted at a cost, no certificates mentioned at all, a minimum order quantity that differs from the quoted quantity, and a document with no price at all. Latest run: **8/8 cases fully correct, 100% field accuracy, $0.0133 total cost.**
+
+What this does and doesn't prove, stated plainly: every document is short, clean, native-digital text, authored with full knowledge of what the schema needed — not independently sourced the way the retrieval eval's cases were. No scanned or genuinely messy real-world document has been tested; Docling's OCR path (`RapidOCR`) has never actually been exercised in this project. 100% here is a real, earned result on exactly what it tested, not a claim about robustness against real-world document variety beyond that.
+
+---
+
 ## Evaluation Approach
 
 The system can be evaluated at multiple points in the RFQ workflow rather than only at the final output.
@@ -309,6 +352,10 @@ Unlike every other AI component in this project, semantic retrieval needed no mo
 ### 8. Semantic Retrieval Hit-Rate Measurement (Implemented)
 
 A second, higher-level retrieval evaluation, distinct from the mechanism-level tests in section 7 above: `eval/retrieval_hit_rate.py` checks whether semantic fallback actually surfaces a usable candidate across a realistic spread of ambiguous items, not just whether the underlying similarity math is correct in isolation. See "Semantic supplier retrieval" above for the corpus design and the 9/9 result. Free and local, not run in CI.
+
+### 9. Quotation Extraction Accuracy (Implemented)
+
+A third real-document-accuracy harness, alongside sections 6 and 8 above: `eval/quotation_extraction_eval.py` measures the Docling + Claude quotation pipeline against 8 hand-built documents covering format variety (PDF, DOCX, a column-aligned layout) and specific real-world gotchas (unit vs. total price, a certificate with a stated cost, a minimum order quantity distinct from the quoted quantity). See "Supplier Quotation Ingestion" above for the full result and what it does and doesn't prove. Makes real, paid Claude calls; not run in CI.
 
 ---
 
@@ -668,6 +715,18 @@ With a `:latest` tag and no explicit override, Kubernetes defaults to `imagePull
 ### Why does the agent's parse-failure logging matter more than it looks?
 A live Kubernetes run hit a real, pre-existing gap: the code silently defaulted to an empty string when a model response had no `text` content block, and the error handling only logged the resulting exception, never what actually caused it. The fix — log the raw text on a parse failure, log which block types were present when there's no text at all — didn't change what the agent does when something goes wrong (it still degrades safely, same as before); it changed whether a *future* occurrence of this can actually be diagnosed instead of just observed.
 
+### Why does `quotation_intake` use an LLM-assisted structuring step as the DEFAULT, not a fallback?
+Every other AI component here tries deterministic logic first. A real test showed why this one is different: a supplier's PDF reconstructed by Docling can collapse "From: X Date: Y" onto one line, or join words with no space at all ("UnitPrice"). That kind of unpredictable, inconsistent formatting across different companies' documents is exactly what regex-based parsing can't reliably survive — an LLM reading for meaning, not matching literal strings, is the right default here, not a shortcut.
+
+### Why does the quotation upload endpoint stay a plain sync `def` route?
+Docling's conversion and the Anthropic call are both blocking. Making the route `async def` without offloading that work would freeze the event loop for every other request while one upload processes. Keeping it a plain sync `def`, like every other route in this project, means Starlette's existing automatic thread-pool dispatch handles the isolation with no new pattern introduced.
+
+### Why does an unreadable file get a 422 but an ambiguous one get 200?
+A document Docling genuinely can't open is broken input — a client-side problem, correctly a 4xx. A document that reads fine but that Claude can't confidently structure is a different kind of result: the same "ambiguous, flagged, human_review_required" outcome every other AI-touched endpoint in this project already returns as a 200. Conflating the two would mean treating normal, expected uncertainty the same as a malformed request.
+
+### Why did `torchvision` need its own fix, separate from the earlier CPU-only `torch` fix?
+Pinning `torch` to PyTorch's CPU index doesn't automatically mean every other package that also depends on `torch` gets a matching build. `docling` pulls in `torchvision` separately, and the regular PyPI wheel for it assumes CUDA-capable `torch` — installing both from the same CPU index together is what actually guarantees their compiled internals match.
+
 ---
 
 ## Containerization
@@ -769,6 +828,12 @@ rfq_ai_project/
 │   ├── corpus.py               # 11-record mock historical corpus, incl. near-duplicate pairs
 │   └── semantic_search.py      # local sentence-transformers embeddings + cosine similarity
 │
+├── quotation_intake/            # Phase 17 supplier quotation ingestion
+│   ├── schemas.py                # SupplierQuotation, CertificateMention (v0)
+│   ├── docling_extractor.py      # deterministic raw-text extraction (PDF, DOCX, etc.)
+│   ├── analysis_core.py          # provider-neutral structuring prompt/validation
+│   └── claude_extractor.py       # thin Anthropic adapter, reuses llm.schemas.CallMetrics
+│
 ├── agent/                      # Phase 13/14c multi-step supplier-search agent
 │   ├── tools.py                # 5 tools + seeded mock supplier DB — no send-email tool
 │   ├── schemas.py              # AgentFinalAnswer, AgentSupplierSearchResult
@@ -785,14 +850,18 @@ rfq_ai_project/
 │   ├── run_eval.py             # workflow-level, runs in CI
 │   ├── analyzer_cases.json     # LLM analyzer (11 cases)
 │   ├── compare_analyzers.py    # mock vs. real, accuracy/cost/latency — not in CI
-│   └── retrieval_hit_rate.py   # semantic retrieval hit rate (9 cases) — free, local, not in CI
+│   ├── retrieval_hit_rate.py   # semantic retrieval hit rate (9 cases) — free, local, not in CI
+│   ├── quotation_extraction_cases.json  # quotation pipeline (8 cases)
+│   ├── quotation_extraction_eval.py     # Docling + Claude field accuracy — real cost, not in CI
+│   └── quotation_fixtures/     # 8 hand-built test documents (PDF, DOCX)
 │
-├── tests/                      # pytest suite (56 tests; 8 need real network, see How to Run)
+├── tests/                      # pytest suite (59 tests; 8 need real network, see How to Run)
 │                               #   + original Module 1–3 test scripts (45 checks)
 ├── conftest.py                 # project-root import path fix; forces mock analyzer in tests
 ├── scripts/
 │   ├── manual_agent_test.py    # live, real-cost agent test — not run by pytest or CI
 │   └── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
+├── eval_fixtures_precheck.py   # free Docling-only check of quotation_fixtures/ before the paid eval run
 │
 ├── mock_data/                  # mock inputs for testing
 ├── knowledge_base/             # suppliers.db (gitignored)
@@ -872,7 +941,7 @@ Same endpoints as above, same behavior — the whole point of this phase was pro
 pytest -v
 ```
 
-56 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, and semantic retrieval. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
+59 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, semantic retrieval, and the quotation upload endpoint. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
 
 ### Run the evaluation harness
 
@@ -896,6 +965,15 @@ python scripts/semantic_retrieval_diagnostic.py
 
 Prints raw similarity scores (no threshold applied) for a set of planned test queries against the corpus — free, local, no API calls. This is what the `0.5` threshold and the test assertions in `tests/test_semantic_retrieval.py` were actually calibrated from.
 
+### Run the quotation extraction eval (real API calls — a few cents)
+
+```bash
+python eval_fixtures_precheck.py   # free: confirms all 8 documents extract cleanly with Docling first
+python eval/quotation_extraction_eval.py   # real: structures each one with Claude, scores field accuracy
+```
+
+Run the free precheck first — if a document extracts garbled, the paid run will just waste money confirming what was already visible for free. See "Supplier Quotation Ingestion" above for the latest result and what it does and doesn't prove.
+
 ### Run the original module test scripts
 
 ```bash
@@ -917,7 +995,7 @@ python tests/test_outlook_sender.py
 pytest -v
 ```
 
-**56 tests passing** across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer (mocked calls), the agent loop and its tools, and semantic retrieval. See "Run the automated test suite (pytest)" above for what needs network access.
+**59 tests passing** across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer (mocked calls), the agent loop and its tools, semantic retrieval, and the quotation upload endpoint (mocked calls). See "Run the automated test suite (pytest)" above for what needs network access.
 
 ### Original module test scripts (Modules 1–3)
 
@@ -968,6 +1046,10 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - The agent's tool set is narrow and single-purpose (supplier search for one item) — this demonstrates the pattern, not a general-purpose agent.
 - The agent's supplier database is a small seeded mock, separate from the real `knowledge_base/suppliers.db` used by Module 2 — not yet connected.
 - The agent-search endpoint makes real, paid API calls with no caching, rate limiting, or cost cap — it's a portfolio demo endpoint, not one designed for public or production exposure as-is.
+- The quotation extraction eval's 8 documents are short, clean, native-digital text authored with knowledge of what the schema needed — not independently sourced, and Docling's OCR path has never actually been exercised against a scanned or genuinely messy real-world document.
+- `SupplierQuotation` is deliberately v0: certificate availability confirmed through a follow-up phone call or email (rather than stated in the document itself) is out of scope, not yet built.
+- There is no comparison/matching logic connecting an extracted `SupplierQuotation` back to the original RFQ line item (part number match, UOM/quantity reconciliation) — deliberately kept separate, not yet built.
+- The quotation upload endpoint makes real, paid Claude calls with no caching, rate limiting, or cost cap, same portfolio-demo caveat as the agent-search endpoint — and like that endpoint, it's untested in CI for the same reason (real cost per call).
 - No MCP implementation — deliberately deferred until after the tool-calling foundation (Phase 13) was built and proven; wrapping tools that didn't exist yet would have been an empty exercise.
 - Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
 - The project remains a portfolio/demo system using mock or sanitized data only.
@@ -982,6 +1064,9 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - Add a mobile-style client example showing how another client could consume the same JSON contract.
 - Connect the agent's supplier tools to the real SQLite supplier knowledge base instead of the small seeded mock.
 - Expand the semantic retrieval corpus to cover more equipment/product categories, reducing forced adjacent-category matches like the current heat-exchanger example.
+- Build the comparison/matching module connecting a `SupplierQuotation` back to its original RFQ line — part number matching, UOM/quantity reconciliation, and the human-review triggers that follow from a mismatch.
+- Capture certificate availability confirmed through follow-up contact (phone, email) rather than only what a document states — the two scenarios explicitly deferred in `SupplierQuotation` v0.
+- Expand the quotation extraction eval set beyond 8 developer-authored documents to independently-sourced, genuinely messy real-world variety, including at least one scanned/OCR case.
 - Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
 - Add a non-root `USER` to the Docker image before treating it as anything beyond a portfolio demo.
 - Make custom application logging visible to `kubectl logs`/`docker logs` directly (e.g. also logging to stdout), instead of requiring `kubectl exec` to read it from inside the container.
@@ -1005,4 +1090,4 @@ This project sits at the intersection of both worlds: deep procurement domain kn
 
 ---
 
-*Built with Python, FastAPI, Pydantic, SQLAlchemy, SQLite, the Anthropic Claude API, sentence-transformers, Docker, Kubernetes (kind), win32com, and a lot of real procurement experience.*
+*Built with Python, FastAPI, Pydantic, SQLAlchemy, SQLite, the Anthropic Claude API, sentence-transformers, Docling, Docker, Kubernetes (kind), win32com, and a lot of real procurement experience.*
