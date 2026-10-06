@@ -156,6 +156,23 @@ def dispatch_tool(
     return result, False
 
 
+def _extract_json_object(text: str) -> Optional[str]:
+    """
+    Finds a JSON object inside text the model wrapped in prose: a fenced
+    block anywhere in the text first, otherwise the outermost {...}.
+    Deliberately simple -- the result is still validated against
+    AgentFinalAnswer, so a wrong guess falls back safely rather than
+    producing a wrong answer.
+    """
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.DOTALL)
+    if fenced:
+        return fenced.group(1)
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        return text[start:end + 1]
+    return None
+
+
 def _parse_final_answer(
     raw_text: str, trace_id: Optional[str] = None
 ) -> AgentFinalAnswer:
@@ -168,16 +185,21 @@ def _parse_final_answer(
     parse error ("Expecting value: line 1 column 1 (char 0)") with no
     way to tell what the model actually returned, because the old
     version only logged the exception, never the text that caused it.
+
+    Tolerates prose BEFORE (or after) the JSON object. Found in a live
+    comparison run: despite the prompt's "ONLY a JSON object", the model
+    sometimes writes a sentence or two first, and the old parser --
+    which only handled a fence at the very start -- threw away a
+    correct answer and reported supplier_candidates_found=False. When
+    the JSON has to be pulled out of surrounding text this logs a
+    warning, so the drift stays visible instead of silently absorbed.
     """
     cleaned = raw_text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
 
-    try:
-        payload = json.loads(cleaned)
-        return AgentFinalAnswer(**payload)
-    except (json.JSONDecodeError, ValidationError) as exc:
+    def _fallback(exc) -> AgentFinalAnswer:
         logger.error(
             "Failed to parse agent final answer | trace_id=%s error=%s raw_text=%r",
             trace_id, exc, raw_text,
@@ -188,6 +210,27 @@ def _parse_final_answer(
             supplier_candidates_found=False,
             recommended_next_step="escalate to human sourcing",
         )
+
+    try:
+        payload = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        extracted = _extract_json_object(raw_text)
+        if extracted is None:
+            return _fallback(exc)
+        try:
+            payload = json.loads(extracted)
+        except json.JSONDecodeError as inner_exc:
+            return _fallback(inner_exc)
+        logger.warning(
+            "Final answer had text around the JSON object; extracted it | "
+            "trace_id=%s",
+            trace_id,
+        )
+
+    try:
+        return AgentFinalAnswer(**payload)
+    except (ValidationError, TypeError) as exc:
+        return _fallback(exc)
 
 
 def run_supplier_search_agent(
