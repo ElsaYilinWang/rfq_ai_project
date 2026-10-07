@@ -40,6 +40,21 @@ has to serialize it. Model reply blocks are converted to dicts on the
 way in (see _block_to_dict). The Anthropic client and tool definitions
 are NOT state; they are closed over by build_graph().
 
+PHASE 18b ADDITION (opt-in: build_graph(..., with_approval=True)).
+After `finalize`, a run that completed AND produced at least one
+successful draft_supplier_email call pauses in its own `human_approval`
+node until a human approves, or rejects with a note. Sending stays
+OUTSIDE the graph: approval only records the decision, so there is
+still no node, tool or edge that can send anything. Rules the node
+follows, each demonstrated by scripts/langgraph_toy_pause.py:
+  - it is its own node, with nothing expensive before interrupt():
+    on resume LangGraph re-runs the node from its first line, so any
+    model call placed before the pause would be paid for twice
+  - its inputs live in STATE (trace_id and the drafts), because state
+    survives the pause while a value passed only in call config is
+    lost unless every resume call supplies it again
+  - a capped run never pauses: it already escalates to human sourcing
+
 One deliberate difference from the old loop: if the model reports
 stop_reason == "tool_use" but returns no tool_use block, the old code
 hit a bare StopIteration. Here call_model raises an explicit
@@ -50,10 +65,12 @@ import json
 import logging
 import operator
 import time
-from typing import Annotated, Optional, TypedDict
+from typing import Annotated, Literal, Optional, TypedDict
 
 from anthropic import Anthropic
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from agent.schemas import AgentSupplierSearchResult, ToolCallRecord
 from agent.supplier_agent import (
@@ -95,6 +112,7 @@ class AgentState(TypedDict):
     final_blocks: Optional[list[dict]]
     # --- output ---
     result: Optional[dict]
+    review: Optional[dict]   # the human's decision (18b); None until decided
 
 
 def _block_to_dict(block) -> dict:
@@ -186,7 +204,76 @@ def capped(state: AgentState) -> dict:
     return {"result": result.model_dump()}
 
 
-def build_graph(client, tools):
+class ReviewDecision(BaseModel):
+    """What a human may answer at the pause. Deliberately minimal (v0):
+    approve, or reject WITH a note. No editing of the draft."""
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["approve", "reject"]
+    note: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _rejection_needs_a_reason(self):
+        if self.note is not None:
+            self.note = self.note.strip() or None
+        if self.decision == "reject" and not self.note:
+            raise ValueError("a rejection must include a note explaining why")
+        return self
+
+
+def _successful_drafts(records: list[dict]) -> list[dict]:
+    return [
+        r["tool_output"] for r in records
+        if r["tool_name"] == "draft_supplier_email" and not r["is_error"]
+    ]
+
+
+def _semantic_matches(records: list[dict]) -> list[dict]:
+    """Weak-evidence matches the reviewer should see next to the draft."""
+    found = []
+    for r in records:
+        if r["tool_name"] == "search_suppliers_semantically" and not r["is_error"]:
+            found.extend(r["tool_output"].get("matches", []))
+    return found
+
+
+def route_after_finalize(state: AgentState) -> str:
+    # Pause only when there is something to approve. A capped run never
+    # reaches finalize (it goes to `capped`), so it never pauses.
+    if state["result"]["completed"] and _successful_drafts(state["tool_call_records"]):
+        return "human_approval"
+    return END
+
+
+def build_review_request(state: AgentState) -> dict:
+    """Everything the reviewer needs, as plain JSON-safe data."""
+    result = state["result"]
+    return {
+        "trace_id": state["trace_id"],
+        "item_description": state["item_description"],
+        "material_number": state["material_number"],
+        "summary": result["summary"],
+        "manufacturer_identified": result["manufacturer_identified"],
+        "recommended_next_step": result["recommended_next_step"],
+        "drafts": _successful_drafts(state["tool_call_records"]),
+        "semantic_matches": _semantic_matches(state["tool_call_records"]),
+        "allowed_decisions": ["approve", "reject (note required)"],
+    }
+
+
+def human_approval(state: AgentState) -> dict:
+    # Cheap and repeatable up to interrupt(): this code runs again on
+    # resume. Nothing expensive and nothing with side effects goes here.
+    answer = interrupt(build_review_request(state))
+    decision = ReviewDecision(**answer)
+    logger.info(
+        "Human review decision | trace_id=%s decision=%s note=%r",
+        state["trace_id"], decision.decision, decision.note,
+    )
+    return {"review": decision.model_dump()}
+
+
+def build_graph(client, tools, checkpointer=None, with_approval=False):
     """
     Compiles the graph. `client` and `tools` are closed over by the two
     nodes that need them rather than stored in state: they are not
@@ -282,9 +369,16 @@ def build_graph(client, tools):
     builder.add_edge(START, "call_model")
     builder.add_conditional_edges("call_model", route_after_model, ["run_tool", "finalize"])
     builder.add_conditional_edges("run_tool", route_after_tool, ["capped", "call_model"])
-    builder.add_edge("finalize", END)
     builder.add_edge("capped", END)
-    return builder.compile()
+    if with_approval:
+        builder.add_node("human_approval", human_approval)
+        builder.add_conditional_edges(
+            "finalize", route_after_finalize, ["human_approval", END]
+        )
+        builder.add_edge("human_approval", END)
+    else:
+        builder.add_edge("finalize", END)
+    return builder.compile(checkpointer=checkpointer)
 
 
 def build_initial_state(
@@ -318,6 +412,7 @@ def build_initial_state(
         "pending_tool_use": None,
         "final_blocks": None,
         "result": None,
+        "review": None,
     }
 
 
