@@ -9,8 +9,9 @@ Two entry points, because a run can now end "waiting for you":
                                  pause for approval and say so
     resume_supplier_review(...)  a human approves, or rejects with a note
 
-plus get_pending_review(...), so a reviewer who comes back later can
-fetch what is waiting without having kept the start response.
+plus get_pending_review(...) and get_review_record(...), so a reviewer
+who comes back later can fetch what is waiting, or what was decided and
+why, without having kept the start response.
 
 SENDING IS NOT HERE. Approval only records the decision. Nothing in this
 module or the graph can send an email; the human still sends from
@@ -72,6 +73,24 @@ class ReviewRunOutcome(BaseModel):
     result: AgentSupplierSearchResult
     review_request: Optional[dict] = None   # what the reviewer must see (awaiting only)
     decision_note: Optional[str] = None
+
+
+class ReviewRecord(BaseModel):
+    """Everything saved about one run, readable at any time.
+
+    state:
+      pending             waiting for a human decision
+      decided             a human approved or rejected (see `decision`)
+      no_review_required  finished without a draft, or hit the cap
+      incomplete          the process died mid-run: a checkpoint exists
+                          but the agent never finished. Not resumable;
+                          start a new run.
+    """
+    trace_id: str
+    state: Literal["pending", "decided", "no_review_required", "incomplete"]
+    review_request: Optional[dict] = None   # pending only
+    decision: Optional[dict] = None         # decided only: {"decision", "note"}
+    result: Optional[AgentSupplierSearchResult] = None
 
 
 class _NoModelOnResume:
@@ -149,6 +168,33 @@ def get_pending_review(trace_id: str, checkpointer=None) -> Optional[dict]:
     if snapshot.next != ("human_approval",):
         return None
     return snapshot.tasks[0].interrupts[0].value
+
+
+def get_review_record(trace_id: str, checkpointer=None) -> Optional[ReviewRecord]:
+    """The saved record of a run, or None if there is no such run."""
+    graph = build_graph(
+        _NoModelOnResume(), [], checkpointer=checkpointer or default_checkpointer,
+        with_approval=True,
+    )
+    snapshot = graph.get_state(_thread(trace_id))
+    if not snapshot.values:
+        return None
+
+    values = snapshot.values
+    if values.get("result") is None:
+        return ReviewRecord(trace_id=trace_id, state="incomplete")
+
+    result = AgentSupplierSearchResult(**values["result"])
+    if snapshot.next == ("human_approval",):
+        return ReviewRecord(
+            trace_id=trace_id, state="pending", result=result,
+            review_request=snapshot.tasks[0].interrupts[0].value,
+        )
+    if values.get("review"):
+        return ReviewRecord(
+            trace_id=trace_id, state="decided", result=result, decision=values["review"],
+        )
+    return ReviewRecord(trace_id=trace_id, state="no_review_required", result=result)
 
 
 def resume_supplier_review(

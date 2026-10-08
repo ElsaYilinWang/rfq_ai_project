@@ -42,3 +42,5 @@ knowledge_base/
 
 venv_wsl/
 hf_cache/
+
+data/

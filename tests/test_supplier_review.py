@@ -28,6 +28,7 @@ from agent.supplier_graph import build_graph
 from agent.supplier_review import (
     ReviewNotPending,
     get_pending_review,
+    get_review_record,
     resume_supplier_review,
     start_supplier_review,
 )
@@ -309,3 +310,55 @@ def test_the_review_graph_still_has_no_node_that_could_send_email():
     graph = build_graph(fake_client([]), tools=[], with_approval=True)
     nodes = set(graph.get_graph().nodes) - {"__start__", "__end__"}
     assert nodes == {"call_model", "run_tool", "finalize", "capped", "human_approval"}
+
+
+# ---------------------------------------------------------------------
+# The saved record: what a reviewer (or a workflow tool) can read later
+# ---------------------------------------------------------------------
+
+def test_record_of_an_unknown_run_is_none():
+    assert get_review_record("never-started", checkpointer=InMemorySaver()) is None
+
+
+def test_record_of_a_waiting_run_carries_the_request():
+    outcome, checkpointer, _ = paused_run()
+    record = get_review_record("run-1", checkpointer=checkpointer)
+
+    assert record.state == "pending"
+    assert record.review_request == outcome.review_request
+    assert record.decision is None
+    assert record.result == outcome.result
+
+
+def test_record_of_a_decided_run_keeps_the_decision_and_the_note():
+    _, checkpointer, _ = paused_run()
+    resume_supplier_review("run-1", "reject", note="wrong supplier", checkpointer=checkpointer)
+    record = get_review_record("run-1", checkpointer=checkpointer)
+
+    assert record.state == "decided"
+    assert record.decision == {"decision": "reject", "note": "wrong supplier"}
+    assert record.review_request is None
+
+
+def test_record_of_a_run_that_needed_no_review():
+    _, checkpointer, _ = start([search(), final()])
+    assert get_review_record("run-1", checkpointer=checkpointer).state == "no_review_required"
+
+
+def test_a_run_that_crashed_midway_is_incomplete_not_pending_and_cannot_be_resumed():
+    """If the process dies while the agent is working, a checkpoint exists
+    but there is nothing to approve. It must not look like a waiting
+    review."""
+    checkpointer = InMemorySaver()
+    client = fake_client([search(), RuntimeError("the process died here")])
+    with patch("agent.supplier_review.Anthropic", return_value=client):
+        with pytest.raises(RuntimeError):
+            start_supplier_review(
+                item_description="ABB circuit breaker 10A", trace_id="crashed",
+                checkpointer=checkpointer,
+            )
+
+    assert get_review_record("crashed", checkpointer=checkpointer).state == "incomplete"
+    assert get_pending_review("crashed", checkpointer=checkpointer) is None
+    with pytest.raises(ReviewNotPending):
+        resume_supplier_review("crashed", "approve", checkpointer=checkpointer)

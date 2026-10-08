@@ -10,3 +10,4 @@ llm_calls.log
 eval/eval_report.json
 eval/analyzer_comparison.json
 eval/retrieval_hit_rate_report.json
+data/

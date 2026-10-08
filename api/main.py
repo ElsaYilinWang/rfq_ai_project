@@ -4,9 +4,10 @@ import os
 import tempfile
 import logging
 import uuid
+from functools import lru_cache
 
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from parser.schemas import (
@@ -28,6 +29,16 @@ from quotation_intake.docling_extractor import extract_raw_text
 from llm.claude_analyzer import get_analyzer
 from agent.supplier_agent import run_supplier_search_agent
 from agent.schemas import AgentSupplierSearchResult
+from agent.checkpointing import make_sqlite_checkpointer
+from agent.supplier_graph import ReviewDecision
+from agent.supplier_review import (
+    ReviewNotPending,
+    ReviewRecord,
+    ReviewRunOutcome,
+    get_review_record,
+    resume_supplier_review,
+    start_supplier_review,
+)
 
 # Both the single-shot analyzer ("llm") and the Phase 13 agent loop
 # ("agent") write one structured line per call to the SAME
@@ -191,6 +202,111 @@ def get_sample_rfq_item_agent_search(line_item: int):
         quantity=item.quantity,
         uom=item.uom,
     )
+
+
+# ---------------------------------------------------------------------
+# Human review of drafted emails (Phase 18b)
+#
+# Approval only RECORDS a decision. Nothing here sends anything: there is
+# no send step anywhere in the agent, the graph, or these routes. There is
+# also no authentication yet, so anyone who can reach this API can record
+# a decision -- fine for a local demo, not for exposure (see the README's
+# limitations).
+# ---------------------------------------------------------------------
+
+@lru_cache(maxsize=1)
+def get_review_checkpointer():
+    """
+    One durable SQLite checkpointer for the whole process, created on
+    first use. REVIEW_DB_PATH chooses the file. In Docker or Kubernetes
+    mount storage that outlives the container at that path, or paused
+    reviews disappear with it. Run ONE replica: the lock that makes the
+    shared connection safe lives inside this process.
+
+    Tests replace this dependency, so they never touch a real file.
+    """
+    return make_sqlite_checkpointer(os.getenv("REVIEW_DB_PATH", "data/reviews.sqlite"))
+
+
+@app.post(
+    "/rfqs/sample/items/{line_item}/review",
+    response_model=ReviewRunOutcome,
+)
+def start_sample_item_review(
+    line_item: int, checkpointer=Depends(get_review_checkpointer)
+):
+    """
+    Run the agent on one line item; if it drafts an email, the run
+    PAUSES for a human (status "awaiting_approval") and this response
+    carries what the reviewer must see. Same cost caveat as agent-search:
+    a real, paid Sonnet run.
+    """
+    parsed_rfq = build_sample_parsed_rfq()
+
+    if line_item < 1 or line_item > len(parsed_rfq.items):
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"line_item {line_item} does not exist; the sample RFQ "
+                f"has {len(parsed_rfq.items)} items."
+            ),
+        )
+
+    item = parsed_rfq.items[line_item - 1]
+    primary_identifier = (
+        item.sourcing_identifiers[0] if item.sourcing_identifiers else None
+    )
+    return start_supplier_review(
+        item_description=item.long_description,
+        material_number=item.material_number,
+        known_manufacturer=(
+            primary_identifier.manufacturer if primary_identifier else None
+        ),
+        known_part_number=(
+            primary_identifier.part_number if primary_identifier else None
+        ),
+        quantity=item.quantity,
+        uom=item.uom,
+        checkpointer=checkpointer,
+    )
+
+
+@app.get("/reviews/{trace_id}", response_model=ReviewRecord)
+def get_review(trace_id: str, checkpointer=Depends(get_review_checkpointer)):
+    """What is saved about a run: waiting, decided (with the note), or not
+    needing review. Works after a restart."""
+    record = get_review_record(trace_id, checkpointer=checkpointer)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"no run with trace_id {trace_id!r}")
+    return record
+
+
+@app.post("/reviews/{trace_id}/decision", response_model=ReviewRunOutcome)
+def decide_review(
+    trace_id: str,
+    decision: ReviewDecision,
+    checkpointer=Depends(get_review_checkpointer),
+):
+    """
+    Approve, or reject with a note (a rejection without a note is a 422
+    and leaves the run waiting). Unknown run: 404. A run that is not
+    waiting (already decided, never needed review, or incomplete): 409.
+    """
+    record = get_review_record(trace_id, checkpointer=checkpointer)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"no run with trace_id {trace_id!r}")
+    if record.state != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"run {trace_id!r} is not waiting for a decision (state: {record.state})",
+        )
+    try:
+        return resume_supplier_review(
+            trace_id, decision.decision, decision.note, checkpointer=checkpointer
+        )
+    except ReviewNotPending as exc:
+        # Two decisions racing: the loser lands here.
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/rfqs/sample/quotations", response_model=QuotationExtractionResponse)
