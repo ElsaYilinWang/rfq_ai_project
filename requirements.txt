@@ -10,3 +10,4 @@ sqlalchemy
 docling
 python-multipart
 langgraph
+langgraph-checkpoint-sqlite
