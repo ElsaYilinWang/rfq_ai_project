@@ -80,6 +80,7 @@ from agent.supplier_agent import (
     OUTPUT_COST_PER_TOKEN,
     SYSTEM_PROMPT,
     _parse_final_answer,
+    build_task_message,
     dispatch_tool,
 )
 from agent.tools import build_anthropic_tool_definitions
@@ -388,15 +389,13 @@ def build_initial_state(
     known_part_number: Optional[str],
     trace_id: Optional[str],
     max_iterations: int,
+    quantity: Optional[int] = None,
+    uom: Optional[str] = None,
 ) -> AgentState:
-    # Identical wording to the old loop's task message.
-    task = (
-        f"RFQ Line Item\n"
-        f"Material Number: {material_number or 'unknown'}\n"
-        f"Description: {item_description}\n"
-        f"Known manufacturer: {known_manufacturer or 'unknown'}\n"
-        f"Known part number: {known_part_number or 'unknown'}\n\n"
-        f"Find supplier candidates for this item."
+    # The old loop's own builder: one definition, so the two can't drift.
+    task = build_task_message(
+        item_description, material_number, known_manufacturer,
+        known_part_number, quantity, uom,
     )
     return {
         "item_description": item_description,
@@ -423,6 +422,8 @@ def run_supplier_search_graph(
     known_part_number: Optional[str] = None,
     trace_id: Optional[str] = None,
     max_iterations: int = MAX_ITERATIONS,
+    quantity: Optional[int] = None,
+    uom: Optional[str] = None,
 ) -> AgentSupplierSearchResult:
     """Same signature and return type as run_supplier_search_agent."""
     client = Anthropic()
@@ -430,7 +431,7 @@ def run_supplier_search_graph(
     final_state = graph.invoke(
         build_initial_state(
             item_description, material_number, known_manufacturer,
-            known_part_number, trace_id, max_iterations,
+            known_part_number, trace_id, max_iterations, quantity, uom,
         ),
         {"recursion_limit": recursion_limit_for(max_iterations)},
     )

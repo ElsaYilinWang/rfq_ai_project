@@ -188,6 +188,8 @@ def get_sample_rfq_item_agent_search(line_item: int):
             primary_identifier.part_number if primary_identifier else None
         ),
         trace_id=trace_id,
+        quantity=item.quantity,
+        uom=item.uom,
     )
 
 

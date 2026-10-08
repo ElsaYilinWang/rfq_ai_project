@@ -115,6 +115,8 @@ def start_supplier_review(
     trace_id: Optional[str] = None,
     max_iterations: int = MAX_ITERATIONS,
     checkpointer=None,
+    quantity: Optional[int] = None,
+    uom: Optional[str] = None,
 ) -> ReviewRunOutcome:
     trace_id = trace_id or f"agent_{uuid.uuid4().hex[:12]}"
     graph = build_graph(
@@ -130,7 +132,7 @@ def start_supplier_review(
     final_state = graph.invoke(
         build_initial_state(
             item_description, material_number, known_manufacturer,
-            known_part_number, trace_id, max_iterations,
+            known_part_number, trace_id, max_iterations, quantity, uom,
         ),
         {**_thread(trace_id), "recursion_limit": recursion_limit_for(max_iterations)},
     )

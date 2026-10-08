@@ -97,7 +97,11 @@ semantic match as equivalent to a manufacturer-based match.
 4. If suppliers are found by either method, you may check whether they \
 are stale.
 5. If you find a good supplier candidate, you may draft an outreach email \
-for human review. Never claim or imply that an email was sent.
+for human review. Never claim or imply that an email was sent. Use the \
+required quantity and unit given in the task exactly. If the required \
+quantity is unknown, the draft tool still needs a number: use 1 as a \
+clearly labelled placeholder and say in your summary that the quantity \
+must be corrected before sending. Never present a guessed quantity as fact.
 6. If no manufacturer can be identified, manufacturer-based search finds \
 nothing, AND semantic search also finds nothing above its threshold, say \
 so plainly — do not fabricate a candidate.
@@ -233,6 +237,38 @@ def _parse_final_answer(
         return _fallback(exc)
 
 
+def build_task_message(
+    item_description: str,
+    material_number: Optional[str] = None,
+    known_manufacturer: Optional[str] = None,
+    known_part_number: Optional[str] = None,
+    quantity: Optional[int] = None,
+    uom: Optional[str] = None,
+) -> str:
+    """
+    The first message the model sees. ONE definition, shared by this loop
+    and by agent/supplier_graph.py, so the two cannot drift apart.
+
+    The required quantity is part of the task because the draft email
+    tool needs a number: before this was added the model was never told
+    the RFQ quantity, filled in 1, and a reviewer could approve a draft
+    with the wrong quantity (seen in a live review run).
+    """
+    if quantity is None:
+        required = "unknown"
+    else:
+        required = f"{quantity} {uom}".strip() if uom else f"{quantity}"
+    return (
+        f"RFQ Line Item\n"
+        f"Material Number: {material_number or 'unknown'}\n"
+        f"Description: {item_description}\n"
+        f"Known manufacturer: {known_manufacturer or 'unknown'}\n"
+        f"Known part number: {known_part_number or 'unknown'}\n"
+        f"Required quantity: {required}\n\n"
+        f"Find supplier candidates for this item."
+    )
+
+
 def run_supplier_search_agent(
     item_description: str,
     material_number: Optional[str] = None,
@@ -240,17 +276,15 @@ def run_supplier_search_agent(
     known_part_number: Optional[str] = None,
     trace_id: Optional[str] = None,
     max_iterations: int = MAX_ITERATIONS,
+    quantity: Optional[int] = None,
+    uom: Optional[str] = None,
 ) -> AgentSupplierSearchResult:
     client = Anthropic()
     tools = build_anthropic_tool_definitions()
 
-    task = (
-        f"RFQ Line Item\n"
-        f"Material Number: {material_number or 'unknown'}\n"
-        f"Description: {item_description}\n"
-        f"Known manufacturer: {known_manufacturer or 'unknown'}\n"
-        f"Known part number: {known_part_number or 'unknown'}\n\n"
-        f"Find supplier candidates for this item."
+    task = build_task_message(
+        item_description, material_number, known_manufacturer,
+        known_part_number, quantity, uom,
     )
     messages = [{"role": "user", "content": task}]
 

@@ -6,8 +6,9 @@ Phase 18b live check: one REAL agent run, a real pause, and you decide.
     python scripts/try_review_flow.py
 
 What happens:
-  1. The agent runs on the ABB circuit-breaker sample item (a real,
-     paid Sonnet run, about $0.03).
+  1. The agent runs on the ABB circuit-breaker sample item, told the
+     RFQ quantity (2 EA), so the draft should say 2 EA, not a guess
+     (a real, paid Sonnet run, about $0.03).
   2. If it produced a draft, the run PAUSES and you see exactly what a
      reviewer would see.
   3. You approve, or reject with a note (a rejection without a note is
@@ -42,6 +43,8 @@ ITEM = {
     "material_number": "MAT-001",
     "known_manufacturer": "ABB",
     "known_part_number": "CB-10A",
+    "quantity": 2,
+    "uom": "EA",
 }
 
 
