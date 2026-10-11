@@ -22,14 +22,15 @@ It was not deployed at DECI and does not contain confidential company, client, s
 - Testable components with schemas, logging, mock sender, and audit-trail outputs
 - API boundary design using FastAPI, Pydantic response schemas, and JSON contracts
 - Lightweight frontend review dashboard using HTML/CSS/JavaScript and `fetch()`
-- Automated testing with pytest (59 tests), an evaluation harness, and CI on every push
+- Automated testing with pytest (147 tests), an evaluation harness, and CI on every push
 - A lightweight SQLAlchemy repository layer over a supplier database
 - A real, structured-output LLM analyzer (Claude Haiku 4.5) with an enforced human-review guardrail, measured against a deterministic baseline
 - A multi-step, tool-calling agent (Claude Sonnet 5) that searches for suppliers, checks staleness, and drafts outreach email — with no send-email capability anywhere in its tool set
 - Local semantic retrieval (`sentence-transformers`, no API cost) as a calibrated fallback when no manufacturer signal exists at all, wired into both the API and the agent
 - A Docker image with the full dependency stack — including local retrieval — built, debugged, and verified end to end, with CI now building and smoke-testing it on every push
-- A working local Kubernetes deployment (`kind`) — Deployment, Service, and Secret, with health-check probes reusing the same `/health` endpoint Docker's CI already relies on, verified end to end and including a real production-shaped bug found and fixed along the way
+- A working local Kubernetes deployment (`kind`) — Deployment, Service, and Secret, with health-check probes reusing the same `/health` endpoint Docker's CI already relies on, verified end to end as of Phase 16 (see "Kubernetes" for what has not been re-verified since) and including a real production-shaped bug found and fixed along the way
 - Supplier quotation document ingestion (PDF, DOCX) via Docling, structured into a validated schema by Claude — the first file-upload endpoint in the API — with measured field-extraction accuracy (8/8 cases, 100%) against a hand-labelled test set, the same rigor applied to every other AI component here
+- The supplier-search agent rebuilt as a LangGraph graph with a durable human-approval pause: a drafted email stops the run, the state survives a restart (a pending review was read back from a container recreated from scratch), and a person approves or rejects with a reason — with an honest account of what the framework costs and where the plain loop would have been enough
 
 ## What Is This?
 
@@ -81,6 +82,8 @@ This layer is intentionally small. It does not replace the core parser, supplier
 - `GET /rfqs/sample/items` returns line-item-level detail (material number, description, manufacturer, part number, UOM, quantity, flags) for the sample RFQ. Items with no manufacturer or part number also carry a `suggestion` field — the output of the LLM analyzer described below.
 - `GET /rfqs/sample/supplier-candidates` returns per-item supplier candidates: a (still mock) historical match for items with a known manufacturer, or a real semantic-retrieval match — with a genuine similarity score — for items with none. If nothing scores above the retrieval threshold, no candidate is returned for that item at all, rather than a forced guess.
 - `GET /rfqs/sample/items/{line_item}/agent-search` runs the multi-step agent (see below) for one line item. Unlike every other endpoint here, this one makes real, paid API calls — not mock data.
+- `POST /rfqs/sample/quotations` accepts a supplier's quotation document and returns it as a structured, validated record (see "Supplier Quotation Ingestion").
+- `POST /rfqs/sample/items/{line_item}/review`, `GET /reviews/{trace_id}` and `POST /reviews/{trace_id}/decision` run the agent, pause for a human when it drafts an email, and record the human's decision (see "LangGraph: Human Approval with a Durable Pause"). The start route makes a real, paid agent run.
 - Pydantic models define the external API response contract for each endpoint.
 - Converter functions in `api/converters.py` map internal parser dataclasses into API-friendly JSON, so a future swap from mock data to the real SQLite supplier database only changes the converter body, not the routes.
 - CORS middleware is enabled for local frontend-backend development.
@@ -133,11 +136,14 @@ The prompt/validation logic lives in a provider-neutral core (`llm/analysis_core
 **Measured, not assumed:** `eval/compare_analyzers.py` runs both analyzers against 11 hand-labelled cases (`eval/analyzer_cases.json`) covering clean extractions, partial matches, a brand name embedded in a part number, and a deliberate true negative (a generic description where the correct answer is "nothing identifiable"). Latest run:
 
 ```
-                          mock    claude
-field accuracy             46%       91%
-total cost               $0.0000   $0.0081
-median latency               0ms     1.93s
+                                mock    claude
+first run (prompt v1)            46%       91%
+after relabel + prompt v2        41%      100%
+total cost (v2 run)           $0.0000   $0.0081
+median latency (v2 run)           0ms     1.93s
 ```
+
+The 46% → 91% run is the cleaner number: Claude's first pass, before anything was adjusted. The 100% comes after one mislabelled case was corrected and the prompt was changed for product-line designations like "S7-1200" while looking at these same 11 cases, so it is a tuned score, not an out-of-sample one. Cost and latency are from the second run.
 
 This is not run in CI — it makes real, paid API calls. Run it by hand with `python eval/compare_analyzers.py`. Disagreements are recorded rather than smoothed over: the case notes (`eval/analyzer_cases.json`) and the prompt version history document a mislabelled case and a prompt gap around product-line designations like "S7-1200" that surfaced during this evaluation.
 
@@ -161,7 +167,7 @@ Given one RFQ line item, it can: search the supplier database by manufacturer, f
 - Every tool call is validated and dispatched by the application; an unknown tool name or malformed arguments returns a structured error to the model instead of crashing the loop.
 - `human_review_required` is unconditionally `true` on every result — success, partial completion, or hitting the iteration cap all produce a valid, reviewable result, never an automatic action.
 
-**Tracing:** every call the agent loop makes — and any nested call it triggers (calling `analyze_item_description` invokes the analyzer above) — logs under the same request `trace_id`, in the same `llm_calls.log` file, in call order. One `grep <trace_id> llm_calls.log` shows the full multi-step, multi-module trace for one request.
+**Tracing:** every call the agent loop makes — and any nested call it triggers (calling `analyze_item_description` invokes the analyzer above) — logs under the same request `trace_id`, in the same `llm_calls.log` file, in call order. One `grep <trace_id> llm_calls.log` shows the full multi-step, multi-module trace for one request. A tool that raises an unexpected exception also leaves a full traceback in the log under that same `trace_id` (before Phase 18 only the message text reached the model and nothing was logged).
 
 **Cost, measured from real runs, not estimated:** a single agent run typically costs $0.01–$0.03 and takes 5–15 seconds — roughly an order of magnitude more than the single-shot analyzer above, because every iteration resends the full conversation history and tool schemas, and Sonnet 5 costs more per token than Haiku. This is a deliberate tradeoff: the loop needs the stronger model for adaptive tool selection, the single-shot analyzer doesn't. `GET /rfqs/sample/items/{line_item}/agent-search` is the only endpoint in this API where that cost applies — every other endpoint here is free and near-instant.
 
@@ -248,6 +254,94 @@ Certificates are deliberately v0: `CertificateMention` (name, status, additional
 `eval/quotation_extraction_eval.py` runs 8 hand-built cases (`eval/quotation_fixtures/`) against the real pipeline — a clean baseline, a column-aligned layout, a DOCX file, the total-vs-unit-price distinction, a certificate quoted at a cost, no certificates mentioned at all, a minimum order quantity that differs from the quoted quantity, and a document with no price at all. Latest run: **8/8 cases fully correct, 100% field accuracy, $0.0133 total cost.**
 
 What this does and doesn't prove, stated plainly: every document is short, clean, native-digital text, authored with full knowledge of what the schema needed — not independently sourced the way the retrieval eval's cases were. No scanned or genuinely messy real-world document has been tested; Docling's OCR path (`RapidOCR`) has never actually been exercised in this project. 100% here is a real, earned result on exactly what it tested, not a claim about robustness against real-world document variety beyond that.
+
+---
+
+## LangGraph: Human Approval with a Durable Pause
+
+Phase 18 rebuilt the Phase 13 agent loop as a LangGraph graph and used it for exactly one thing the plain loop cannot do: **stop for a human, and pick up later — even after the process has been destroyed.** When the agent drafts a supplier email, the run pauses, its state is written to disk, and nothing continues until a person approves it or rejects it with a reason.
+
+### Why LangGraph, and where the plain loop would have been enough
+
+The graph is not shorter or simpler than the loop it replaced. The loop itself is 146 lines of code against 115 (about 27% more), because state that a `for` loop keeps in local variables has to be passed through explicitly; the whole stack — graph, review entry points, checkpointer — is 442 lines. It also adds a dependency and a new class of bugs (below). Without the pause, I would have kept the plain loop. The reason to use a graph here is state that is checkpointed and outlives the process, which a `for` loop cannot offer.
+
+### The graph
+
+```mermaid
+flowchart TD
+    A(["POST /rfqs/sample/items/N/review"]) --> B["call_model"]
+    B -->|"model asks for a tool"| C["run_tool"]
+    B -->|"model gives its answer"| D["finalize"]
+    C -->|"cap reached"| E["capped"]
+    C -->|"otherwise"| B
+    D -->|"completed and a draft exists"| F{{"human_approval: PAUSE, checkpoint saved"}}
+    D -->|"no draft"| G(["end: no review required"])
+    E --> H(["end: not completed, escalate to a human"])
+    F -.->|"POST /reviews/ID/decision"| I(["approve, or reject with a note, recorded"])
+```
+
+`call_model` and `run_tool` carry the original loop; `finalize` and `capped` produce the two kinds of result the old loop could return; `human_approval` is new and exists only when the review flow asks for it. The Anthropic client is not part of the saved state; the dispatcher, prompt, parser and task builder are reused from the original agent rather than copied.
+
+### Refactor first, proven three ways
+
+Before adding the pause, the loop was rebuilt with no new behavior, so that any difference could be blamed on the framework and nothing else.
+
+- **Scripted parity (19 tests).** The same scripted model responses are fed to both implementations and their results are compared field by field, along with the request sent to the model on every call and the conversation it sees. Breaking the graph on purpose (an off-by-one in the cap, a wrong `completed` flag, re-enabling parallel tool use, a limit equal to the cap) was caught every time.
+- **Identical requests.** Capturing the real request bodies through the SDK showed one difference: the original loop echoes a `"citations": null` field on text blocks that the graph omits. Text, tool ids, names and inputs are identical.
+- **A live comparison (12 real runs, $0.41).** Each of four items ran through the old loop twice and the graph once, because the model is non-deterministic and one run each proves nothing. The old loop agreed with itself on 2 of 4 items; old and graph agreed on 1 of 8 comparisons. That is not a clean pass and I do not present it as one: exact tool sequences vary even run to run, and two of the twelve runs were damaged by a parser bug (below). The structural proofs carry the parity claim; the live run shows the graph works against the real API and costs the same ($0.033 per run against $0.034). One graph run wandered to the cap and returned a clean, reviewable `completed=false` result — the cap working live.
+
+### The cap is enforced by our router, not the framework
+
+The framework's own `recursion_limit` raises an exception and discards the partial run; the original loop instead returned a valid, reviewable result when it hit its cap. So the cap lives in state and is checked by a router, which sends a capped run to a node that builds that same result. `recursion_limit` stays as a backstop, set from the cap: the worst legitimate path is 2N + 1 steps (N model calls, N tool runs, one capped node), so the limit is 2N + 5. The framework default in the installed version (1.2.14) is about 10,000 steps — measured, not the 25 older articles and docs state — which for a paid loop would mean thousands of model calls before anything stopped.
+
+### The approval pause
+
+- **When it pauses:** only when the run completed and produced at least one successful draft. A capped run, or a run with no draft, never pauses.
+- **The node does nothing but ask.** LangGraph re-runs the node containing the pause from its first line on resume, so anything expensive before it would be paid for twice. A toy (`scripts/langgraph_toy_pause.py`) shows it: work placed inside the interrupt node ran twice; work in a separate node ran once.
+- **State, not config.** `trace_id` lives in the saved state because a value passed only in call config is gone on resume unless every resume call supplies it again; `thread_id` equals `trace_id`, so one id finds the run in the logs, the checkpoint and the API.
+- **Approve, or reject with a note.** A rejection without a note is refused before the run is touched and the run keeps waiting. Deciding twice, or deciding an unknown run, is refused without re-running anything.
+- **Approval only records the decision.** Nothing in the graph, the tools or the API can send an email; the engineer still sends from Outlook. `human_review_required` stays `true` on the result after approval — the decision is a separate, recorded fact, and nothing is allowed to flip that flag.
+- **Resuming cannot spend money.** It runs with a model client that raises if anything tries to call it, and a test makes building a real client fail loudly.
+
+### Durable: a SQLite checkpointer
+
+`make_sqlite_checkpointer` stores checkpoints in a SQLite file so a paused review and the later decision survive a restart. Two details come straight from earlier bugs: the connection needs `check_same_thread=False` because FastAPI runs routes on worker threads (a default connection fails with the same sentence as the earlier `StaticPool` bug; the saver adds its own lock), and the saver is built from an explicit connection because `from_conn_string` closes its connection when its `with` block ends. The database runs in WAL mode (the saver switches it on itself), and it assumes one process and one file.
+
+It is proven at two levels. Tests treat "restart" as dropping every object and rebuilding from the file path alone. And on a real container: a review left waiting was read back, with the same draft, from a container recreated from scratch (the old one was 43 hours old), then approved, and the recorded decision read back again.
+
+### The review API
+
+| Route | What it does | Status codes |
+|---|---|---|
+| `POST /rfqs/sample/items/{n}/review` | Runs the agent (a real, paid run, about $0.03); pauses if it drafts | 200 `awaiting_approval` or `no_review_required`; 404 unknown item |
+| `GET /reviews/{trace_id}` | The saved record: waiting, decided (with the note), no review needed, or incomplete (the process died mid-run) | 200; 404 unknown run |
+| `POST /reviews/{trace_id}/decision` | `approve`, or `reject` with a note | 200; 404 unknown run; 409 not waiting; 422 invalid decision |
+
+### Real bugs found along the way
+
+- **A parser that threw away correct answers.** In the live comparison, 2 of 12 runs wrote a sentence before the JSON answer; the parser only handled a code fence at the very start, so it discarded the answer and reported `supplier_candidates_found=false` although suppliers were found. The bug dates from Phase 13. It is fixed once, in the function both loops share, with 6 regression tests.
+- **The agent was never told the quantity.** The task message held the description and identifiers but not the RFQ quantity, and the draft tool requires a number, so a reviewer saw "Quantity: 1 EA" for an RFQ asking for 2 — and in the second live run the model's summary did not say it was a placeholder. Fixed with one shared task builder plus a prompt rule; a live run now drafts "2 EA".
+- **A failing tool left no trace.** When a tool raised, the model saw only the message and the traceback was logged nowhere. It is now logged at ERROR with the run's `trace_id`.
+- **The framework's default limit was not what I expected.** I predicted 25 from documentation; the installed version allows about 10,000. A test now checks the backstop stops a broken cap after a handful of steps.
+- **Reusing a `trace_id`.** Starting a run under an id that already has a saved run is refused: the list reducers that append messages would otherwise carry the old run's history into the new one. (Reasoned from how the state is defined; the guard is tested, the merge itself was not reproduced.)
+- **A stale `.env` in the WSL copy.** The container returned a 401 because the project exists in two copies (the Windows folder I edit and a WSL copy Docker builds from), and the WSL copy still held the old key. Environment variables are fixed when a container is created, so the container had to be recreated after syncing.
+- **A gap in my own tests.** Every route test replaced the checkpointer dependency, so the real default path was never exercised until a container ran it. A test now drives a full request through it.
+
+### Measured
+
+| What | Result |
+|---|---|
+| Tests | 59 → 147 (88 added in Phase 18) |
+| Cost per agent run | $0.033 graph vs $0.034 original loop (12 live runs); $0.02–$0.03 per review run |
+| Median model latency | 12.0s graph vs 15.2s original over 4 and 8 runs — too few to read anything into |
+| Loop size | 146 vs 115 code lines (+27%); whole stack 442 lines |
+| Docker image | 2.31GB (1.61GB at Phase 15, before Docling) |
+| Cold start | 18s unrestricted; 20s limited to 1 CPU and 2GB |
+| Memory | about 512 MiB idle; peak 1542 MiB while processing one one-page PDF (a cgroup peak, which includes reclaimable file cache) |
+
+### What this does not claim
+
+It does not claim less code, or tool-for-tool identical behavior from a non-deterministic model. It has no authentication, so anyone who can reach the API can record a decision, and a saved decision records what was decided and why but not who decided or when. Approval covers a whole run, not each draft separately, and v0 has no editing. The second pause the design always had in mind — waiting for the supplier's quotation and then running the extraction — is not built, because the comparison step it would feed does not exist yet.
 
 ---
 
@@ -356,6 +450,10 @@ A second, higher-level retrieval evaluation, distinct from the mechanism-level t
 ### 9. Quotation Extraction Accuracy (Implemented)
 
 A third real-document-accuracy harness, alongside sections 6 and 8 above: `eval/quotation_extraction_eval.py` measures the Docling + Claude quotation pipeline against 8 hand-built documents covering format variety (PDF, DOCX, a column-aligned layout) and specific real-world gotchas (unit vs. total price, a certificate with a stated cost, a minimum order quantity distinct from the quoted quantity). See "Supplier Quotation Ingestion" above for the full result and what it does and doesn't prove. Makes real, paid Claude calls; not run in CI.
+
+### 10. Original Agent Loop vs LangGraph Version (Implemented)
+
+Two layers, because the model is non-deterministic. `tests/test_supplier_graph.py` runs the same scripted responses through both implementations and compares results field by field — free, and part of the pytest suite. `scripts/compare_agent_vs_graph.py` runs real calls (old loop twice, graph once, per item) so that old-versus-old disagreement gives a noise baseline to judge the graph against. About $0.40 per run; not in CI. See "LangGraph: Human Approval with a Durable Pause" for the result and what it does and doesn't prove.
 
 ---
 
@@ -559,6 +657,8 @@ The system never sends emails automatically. At every critical decision point, i
 
 This is intentional. Procurement involves real money and real relationships. The human stays in control.
 
+In the API layer this is no longer only a convention: as of Phase 18, a drafted email makes the run actually stop — its state is saved to disk and nothing continues until a person approves it, or rejects it with a reason. See "LangGraph: Human Approval with a Durable Pause".
+
 ### 3. Modular Architecture
 
 The system is split into three independent modules, each with clear inputs and outputs. Modules can be tested, updated, or replaced without touching the others.
@@ -701,7 +801,7 @@ Same deterministic-first priority used everywhere else in this project: exact/ma
 A real live agent run crashed with `no such table: suppliers` — not a retrieval bug, a SQLite concurrency one. FastAPI runs synchronous routes in a thread pool, and SQLAlchemy's default pooling for SQLite `:memory:` gives every new thread its own separate, empty database. `StaticPool` shares one real connection across every thread instead — the standard fix, verified with a genuine multi-threaded test that fails without it and passes with it.
 
 ### Why install PyTorch from a separate CPU-only wheel index?
-The default PyPI `torch` wheel on Linux bundles the full NVIDIA CUDA runtime by default, on the assumption a GPU might be present. This container has no GPU, and a similarity search over an 11-record corpus wouldn't benefit from one even if it did — installing from PyTorch's dedicated CPU index (`download.pytorch.org/whl/cpu`) avoided several gigabytes of genuinely unused dependencies, cutting the final image from a likely 5-6GB down to a measured 1.61GB.
+The default PyPI `torch` wheel on Linux bundles the full NVIDIA CUDA runtime by default, on the assumption a GPU might be present. This container has no GPU, and a similarity search over an 11-record corpus wouldn't benefit from one even if it did — installing from PyTorch's dedicated CPU index (`download.pytorch.org/whl/cpu`) avoided several gigabytes of genuinely unused dependencies, cutting the final image from a likely 5-6GB down to a measured 1.61GB at the time (2.31GB today, after Docling was added).
 
 ### Why did the Docker build need to happen from WSL2's own filesystem, not the Windows-mounted drive?
 Every file Docker reads to build its context crosses WSL2's Windows/Linux filesystem boundary when the project lives under `/mnt/d`, and that boundary carries a real, well-documented performance cost for workloads with many small files — a Python venv with PyTorch installed is close to a worst case. `docker build` (and a plain `du -sh` on the same folder) hung for the better part of an hour before the fix: copying the project into WSL2's native filesystem first, the standard Microsoft-documented practice for exactly this situation.
@@ -727,6 +827,21 @@ A document Docling genuinely can't open is broken input — a client-side proble
 ### Why did `torchvision` need its own fix, separate from the earlier CPU-only `torch` fix?
 Pinning `torch` to PyTorch's CPU index doesn't automatically mean every other package that also depends on `torch` gets a matching build. `docling` pulls in `torchvision` separately, and the regular PyPI wheel for it assumes CUDA-capable `torch` — installing both from the same CPU index together is what actually guarantees their compiled internals match.
 
+### Why LangGraph for the agent loop, if the plain loop worked?
+For one capability only: a run that stops for a human and resumes later, from state that outlives the process. The graph is about 27% more loop code than the plain loop and adds a dependency, so without that pause the plain loop would have stayed. The refactor was done first, with no new behavior, so any difference could be blamed on the framework.
+
+### Why is the iteration cap enforced by our own router, not LangGraph's `recursion_limit`?
+Hitting the framework's limit raises an exception and discards the partial run, while the original loop returned a valid, reviewable result at its cap. A router in the graph sends a capped run to a node that builds that same result. `recursion_limit` remains as a backstop set from the cap (2N + 5, against a worst legitimate path of 2N + 1), because the installed version's default is about 10,000 steps.
+
+### Why does the approval node do nothing except ask?
+LangGraph re-runs the node containing the pause from its first line when the run resumes, so any expensive work placed before the pause would be paid for twice. The node therefore only builds the review request from saved state, pauses, and records the answer.
+
+### Why does `trace_id` live in the graph's state, not in call config?
+State survives the pause; a value passed only in config is gone on resume unless every resume call supplies it again. With `thread_id` equal to `trace_id`, one id finds the run in the logs, the checkpoint and the API.
+
+### Why does the SQLite checkpointer need `check_same_thread=False`, and why not `from_conn_string`?
+FastAPI runs routes on worker threads, and a default SQLite connection refuses to be used from any thread but its creator — the same failure behind the earlier `StaticPool` bug. The saver's internal lock makes the shared connection safe. `from_conn_string` is a context manager that closes its connection when the `with` block ends, which suits a script but not a server. The lock lives inside the process, so it assumes one process and one file.
+
 ---
 
 ## Containerization
@@ -739,13 +854,21 @@ The `Dockerfile` starts from `python:3.11-slim` (matching the Python version CI 
 
 **The embedding model is baked in at build time, not left to download on first request.** This is the standard production pattern for a service depending on a third-party model hub: the exact model version is pinned to the image build, and the running container has no runtime dependency on reaching Hugging Face at all — important in any environment with restricted network egress, and it avoids a container's first real request paying a multi-second download delay. Confirmed in practice: `GET /rfqs/sample/supplier-candidates` responds instantly inside the container, with the identical similarity score (`0.57` for the Flowserve match) it produces everywhere else this project has run it.
 
-**Secrets are never baked into the image.** `.dockerignore` excludes `.env`; `ANTHROPIC_API_KEY` is passed at `docker run` time (`-e ANTHROPIC_API_KEY=...`), the same principle established back when the real Claude analyzer was first wired in — a key baked into an image layer is recoverable by anyone who ever gets that image, even after a later layer appears to remove it.
+**Secrets are never baked into the image.** `.dockerignore` excludes `.env`; `ANTHROPIC_API_KEY` is passed at `docker run` time (`--env-file .env`, so the key never appears in a typed command or in shell history), the same principle established back when the real Claude analyzer was first wired in — a key baked into an image layer is recoverable by anyone who ever gets that image, even after a later layer appears to remove it.
 
 ### Two real bugs, found by actually building it
 
-**PyTorch pulled in the full NVIDIA CUDA runtime by default.** The first real build correctly installed `sentence-transformers`, but its `torch` dependency resolved to the default PyPI wheel — which bundles the entire GPU/CUDA toolkit (`nvidia-cudnn`, `nvidia-cublas`, `nvidia-cusparse`, `triton`, and more), several extra gigabytes for hardware this container doesn't have and a workload that wouldn't benefit from a GPU even if it did. Fixed by installing from PyTorch's own dedicated CPU-only wheel index before installing the rest of `requirements.txt`, so the CPU build was already satisfied by the time `sentence-transformers` looked for `torch`. Measured effect: the final image is `1.61GB`.
+**PyTorch pulled in the full NVIDIA CUDA runtime by default.** The first real build correctly installed `sentence-transformers`, but its `torch` dependency resolved to the default PyPI wheel — which bundles the entire GPU/CUDA toolkit (`nvidia-cudnn`, `nvidia-cublas`, `nvidia-cusparse`, `triton`, and more), several extra gigabytes for hardware this container doesn't have and a workload that wouldn't benefit from a GPU even if it did. Fixed by installing from PyTorch's own dedicated CPU-only wheel index before installing the rest of `requirements.txt`, so the CPU build was already satisfied by the time `sentence-transformers` looked for `torch`. Measured effect: `1.61GB` at the end of Phase 15 (`2.31GB` today — see "After Phases 17–18" below).
 
 **`docker build` silently hung for the better part of an hour**, with no error and no progress, because the project lived on a Windows-mounted drive (`/mnt/d`, accessed from WSL2), and every file Docker needed to read for the build context crossed WSL2's Windows/Linux filesystem boundary — a well-documented performance cliff for workloads with many small files. A plain `du -sh` on the same folder hung identically, which is what isolated the cause to filesystem access rather than anything Docker-specific. Fixed by copying the project into WSL2's own native filesystem before building. A second false trail during the same investigation — two long-forgotten virtual environments (`venv_wsl/`, `venv312/`) that had never come up before — turned out to be responsible for a 5.7GB `rsync` transfer; excluding them and deleting them from the copy brought it down to under 1MB of real project files.
+
+### After Phases 17–18: what changed in the container
+
+- **Size and startup.** The image is `2.31GB`; the growth coincides with adding Docling's dependency stack (I did not break it down layer by layer). The server is ready to answer `/health` after 18 seconds, and after 20 seconds when limited to 1 CPU and 2GB.
+- **Memory.** About 512 MiB idle. Processing one one-page PDF peaked at 1542 MiB under a 2GB limit (no out-of-memory kill) — a cgroup peak, which includes reclaimable file cache, measured on a single small document; a longer document or two at once would use more.
+- **Docling's own models are not baked in.** The embedding model is, but Docling downloads its layout and OCR models on the first upload, so a fresh container's first upload is slow and needs network access.
+- **The review database lives on a named volume.** `-v rfq-review-data:/data` with `REVIEW_DB_PATH=/data/reviews.sqlite`. Removing the container does not remove the volume; WAL mode leaves `-wal` and `-shm` files beside the database, so a backup must take all three.
+- **Environment variables are fixed when a container is created.** A real incident: after rotating the API key, the container still returned a 401 because the WSL copy of the project held the old `.env`. Editing `.env` changes nothing in an existing container: sync the file, `chmod 600` it (the sync copies the Windows drive's open permissions), and recreate the container.
 
 ### Continuous Integration
 
@@ -776,6 +899,14 @@ Fixed two ways: the fallback path now logs which content block types *were* actu
 ### Verified
 
 The same five-endpoint checklist from Docker, re-run against the cluster through `kubectl port-forward`: health, sample RFQ, items (confirming the `Secret` delivered the API key correctly), supplier-candidates (confirming the baked-in embedding model survived the image transfer into the cluster — the same `0.57` similarity score it has now produced identically in five separate environments), and the full agent-search path, including the SQL-backed tools and the `StaticPool` fix, under Kubernetes' own process model specifically.
+
+### Not re-verified since Phase 16
+
+The manifests and the checks above date from Phase 16, before Docling, LangGraph and the review API. What measurements since then imply — none of it applied or tested in the cluster yet:
+
+- **Probes.** The readiness probe first checks at 5 seconds and the liveness probe at 10 seconds, every 10 seconds, restarting after three failures. Startup takes 18–20 seconds, so on an idle machine the margin before a restart is about 10 seconds. A `startupProbe` is the right tool for a slow starter.
+- **Memory limit.** The 2Gi limit sits close to the 1542 MiB peak measured on a single small PDF; a higher limit (3Gi would be my starting guess, not a measurement) is likely needed before Docling can be trusted in the cluster.
+- **The review database.** It would need a PersistentVolumeClaim on local block storage (WAL mode does not work on network filesystems) and one pod at a time — a `Recreate` update strategy — because the lock lives inside the process and a rolling update would briefly run two pods against one file.
 
 ---
 
@@ -834,10 +965,13 @@ rfq_ai_project/
 │   ├── analysis_core.py          # provider-neutral structuring prompt/validation
 │   └── claude_extractor.py       # thin Anthropic adapter, reuses llm.schemas.CallMetrics
 │
-├── agent/                      # Phase 13/14c multi-step supplier-search agent
+├── agent/                      # Phase 13/14c supplier-search agent; Phase 18 graph + review
 │   ├── tools.py                # 5 tools + seeded mock supplier DB — no send-email tool
 │   ├── schemas.py              # AgentFinalAnswer, AgentSupplierSearchResult
-│   └── supplier_agent.py       # the loop: dispatch, iteration cap, tracing
+│   ├── supplier_agent.py       # the original loop: dispatch, iteration cap, tracing; also the shared prompt, parser, task builder
+│   ├── supplier_graph.py       # Phase 18: the same loop as a LangGraph graph, plus the opt-in approval node
+│   ├── supplier_review.py      # Phase 18: start, read and resume a review run
+│   └── checkpointing.py        # Phase 18: durable SQLite checkpointer
 │
 ├── db/                         # Phase 9 SQLAlchemy repository layer
 │   ├── models.py               # Supplier model
@@ -855,16 +989,20 @@ rfq_ai_project/
 │   ├── quotation_extraction_eval.py     # Docling + Claude field accuracy — real cost, not in CI
 │   └── quotation_fixtures/     # 8 hand-built test documents (PDF, DOCX)
 │
-├── tests/                      # pytest suite (59 tests; 8 need real network, see How to Run)
+├── tests/                      # pytest suite (147 tests; 8 need real network, see How to Run)
 │                               #   + original Module 1–3 test scripts (45 checks)
 ├── conftest.py                 # project-root import path fix; forces mock analyzer in tests
 ├── scripts/
 │   ├── manual_agent_test.py    # live, real-cost agent test — not run by pytest or CI
-│   └── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
+│   ├── semantic_retrieval_diagnostic.py  # one-off raw-score diagnostic — not part of the test suite
+│   ├── compare_agent_vs_graph.py  # live old-loop vs LangGraph comparison (about $0.40) — not in CI
+│   ├── try_review_flow.py      # live human-approval walkthrough (about $0.03) — not in CI
+│   └── langgraph_toy_loop.py, langgraph_toy_capped.py, langgraph_toy_pause.py  # free learning toys: recursion limit, router-enforced cap, pause/resume
 ├── eval_fixtures_precheck.py   # free Docling-only check of quotation_fixtures/ before the paid eval run
 │
 ├── mock_data/                  # mock inputs for testing
 ├── knowledge_base/             # suppliers.db (gitignored)
+├── data/                       # review checkpoints (reviews.sqlite) — gitignored
 ├── output/                     # JSON outputs (gitignored)
 ├── logs/                       # rotating logs (gitignored)
 ├── main.py                     # interactive pipeline entry point
@@ -918,10 +1056,14 @@ With the server running, open `frontend/index.html` for the review dashboard, or
 
 ```bash
 docker build -t rfq-ai-api .
-docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key_here rfq-ai-api
+docker run -d --name rfq-test -p 8000:8000 \
+  --env-file .env \
+  -e REVIEW_DB_PATH=/data/reviews.sqlite \
+  -v rfq-review-data:/data \
+  rfq-ai-api
 ```
 
-The embedding model is baked into the image at build time (see "Containerization" above), so `GET /rfqs/sample/supplier-candidates` responds instantly inside the container — no live Hugging Face download. `ANTHROPIC_API_KEY` is passed at `docker run` time, never baked into the image. First build takes a few minutes (PyTorch plus the embedding model); rebuilds are much faster unless `requirements.txt` changes, since Docker caches that layer.
+The embedding model is baked into the image at build time (see "Containerization" above), so `GET /rfqs/sample/supplier-candidates` responds instantly inside the container — no live Hugging Face download. `ANTHROPIC_API_KEY` is passed at `docker run` time, never baked into the image. First build takes a few minutes (PyTorch plus the embedding model); rebuilds are much faster unless `requirements.txt` changes, since Docker caches that layer. The server takes about 20 seconds to start (poll `http://localhost:8000/health`). `--env-file .env` reads the key from your local file instead of a typed command, and the named volume `rfq-review-data` keeps paused reviews when the container is removed. Environment variables are fixed when a container is created, so after changing `.env`, remove and recreate the container (see "After Phases 17–18" above).
 
 ### Run with Kubernetes (kind)
 
@@ -941,7 +1083,26 @@ Same endpoints as above, same behavior — the whole point of this phase was pro
 pytest -v
 ```
 
-59 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, semantic retrieval, and the quotation upload endpoint. Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
+147 tests across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer, the agent loop and its tools, semantic retrieval, the quotation upload endpoint, the LangGraph version of the agent (parity-tested against the original loop), the human-approval pause and its review API, the durable SQLite checkpointer, and observability (trace ids and tool-failure logging). Every Anthropic call in this suite is mocked — `conftest.py` strips any local API key for the duration of a test run — so no test ever costs money. Semantic retrieval is the one exception to "no network": those tests run a real local embedding model (no API, no cost) but need genuine internet access the first time, to download the model — cached locally after that.
+
+### Try the human-approval flow (one real agent run, about $0.03)
+
+```bash
+python scripts/try_review_flow.py
+```
+
+Runs the agent on the sample ABB item, pauses on the drafted email, shows what a reviewer would see, and lets you approve or reject with a note in the terminal. It then tries to decide the same run a second time, which must be refused. The model does not always draft an email; if this run produces none, there is nothing to approve — run it again. Nothing is ever sent.
+
+The same flow through the API (with the server running):
+
+```bash
+curl -X POST http://localhost:8000/rfqs/sample/items/1/review
+curl http://localhost:8000/reviews/<trace_id>
+curl -X POST http://localhost:8000/reviews/<trace_id>/decision -H "Content-Type: application/json" -d '{"decision":"approve"}'
+curl -X POST http://localhost:8000/reviews/<trace_id>/decision -H "Content-Type: application/json" -d '{"decision":"reject","note":"wrong quantity"}'
+```
+
+Saved reviews live in `data/reviews.sqlite` (gitignored); set `REVIEW_DB_PATH` to move it.
 
 ### Run the evaluation harness
 
@@ -974,6 +1135,14 @@ python eval/quotation_extraction_eval.py   # real: structures each one with Clau
 
 Run the free precheck first — if a document extracts garbled, the paid run will just waste money confirming what was already visible for free. See "Supplier Quotation Ingestion" above for the latest result and what it does and doesn't prove.
 
+### Compare the original agent loop with the LangGraph version (real API calls — about $0.40)
+
+```bash
+python scripts/compare_agent_vs_graph.py
+```
+
+Twelve real runs: each of four items through the original loop twice and through the graph once, so old-versus-old disagreement gives a noise baseline. See "LangGraph: Human Approval with a Durable Pause" for how to read the result.
+
 ### Run the original module test scripts
 
 ```bash
@@ -995,7 +1164,7 @@ python tests/test_outlook_sender.py
 pytest -v
 ```
 
-**59 tests passing** across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer (mocked calls), the agent loop and its tools, semantic retrieval, and the quotation upload endpoint (mocked calls). See "Run the automated test suite (pytest)" above for what needs network access.
+**147 tests passing** across API contract checks, the SQLAlchemy repository, the structured-output schema, the real Claude analyzer (mocked calls), the agent loop and its tools, semantic retrieval, the quotation upload endpoint (mocked calls), the LangGraph agent and its parity with the original loop, the human-approval pause and review API, the durable checkpointer, and observability. See "Run the automated test suite (pytest)" above for what needs network access.
 
 ### Original module test scripts (Modules 1–3)
 
@@ -1033,9 +1202,11 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 
 **On learning:** I used a Socratic approach with AI assistance throughout — reasoning through every decision before receiving guidance, rather than copying answers. This made the learning stick and the design genuinely mine.
 
+**On orchestration frameworks:** A framework should earn its place with one capability, not by being fashionable. LangGraph made the loop about 27% bigger; what it gave me is state that survives a restart, which a plain loop cannot do. I proved the refactor changed nothing before adding the pause, and I would drop the framework if the pause went away. Three real bugs found while testing it — a parser that discarded correct answers, a missing quantity, and tool failures that left no trace — had been in the original loop all along: the new tests found them, not the framework.
+
 ## Current Limitations
 
-- The FastAPI layer exposes sample-RFQ endpoints (review, line items, supplier candidates, agent search) rather than the full Excel upload workflow. The sample RFQ and the historical supplier matches are mock data; the LLM suggestions, semantic fallback, and agent calls are real.
+- The FastAPI layer exposes sample-RFQ endpoints (parse review, line items, supplier candidates, agent search, the human-approval review flow) and a quotation-document upload, rather than the full Excel upload workflow. The sample RFQ and the historical supplier matches are mock data; the LLM suggestions, semantic fallback, and agent calls are real.
 - The frontend is a lightweight local review dashboard, not a deployed production web application.
 - The historical/manufacturer-match half of supplier candidates is still mock data, not connected to the real SQLite supplier knowledge base — the semantic-fallback half is real as of Phase 14, but searches a small separate mock corpus, not the real historical database.
 - The semantic retrieval corpus is a small (11-record) mock dataset that doesn't cover every equipment category — e.g. it has no heat-exchanger-specific entries, so that kind of query can only ever find a modestly-similar adjacent match (pump seals), never a strong one.
@@ -1050,8 +1221,15 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - `SupplierQuotation` is deliberately v0: certificate availability confirmed through a follow-up phone call or email (rather than stated in the document itself) is out of scope, not yet built.
 - There is no comparison/matching logic connecting an extracted `SupplierQuotation` back to the original RFQ line item (part number match, UOM/quantity reconciliation) — deliberately kept separate, not yet built.
 - The quotation upload endpoint makes real, paid Claude calls with no caching, rate limiting, or cost cap, same portfolio-demo caveat as the agent-search endpoint — and like that endpoint, it's untested in CI for the same reason (real cost per call).
+- The review API has no authentication: anyone who can reach it can record a decision. A saved decision records what was decided and why, but not who decided or when. Approval covers a whole run rather than each draft, and v0 has no editing of the draft.
+- Approval only records a decision; sending stays manual by design. The dashboard has no controls for the review flow — it is reached through the API docs page, `curl`, or `scripts/try_review_flow.py`.
+- Review checkpoints live in one SQLite file in WAL mode and assume one process and local storage. The Kubernetes manifests have not been re-verified since Phase 16 (see "Kubernetes").
+- A failed model call (an invalid API key, for example) reaches the caller as a bare `500`; the real error is only in the server log. A run that dies mid-way leaves an "incomplete" record, and the caller never received its id.
+- Cold start takes about 18–20 seconds, and Docling's models download on the first upload.
+- Per the workflow described above, CI runs the evaluation harness and the Docker build, not the pytest suite. The suite runs locally on Python 3.13 while the image uses 3.11; the review-API and observability tests were also run on 3.11 in a separate environment.
+- The second pause the LangGraph design had in mind — waiting for the supplier's quotation, then running the extraction — is not built, because the comparison step it would feed does not exist yet.
 - No MCP implementation — deliberately deferred until after the tool-calling foundation (Phase 13) was built and proven; wrapping tools that didn't exist yet would have been an empty exercise.
-- Authentication, deployment, file upload handling, and full frontend workflow controls are not implemented yet.
+- Authentication, production deployment, and full frontend workflow controls are not implemented yet.
 - The project remains a portfolio/demo system using mock or sanitized data only.
 
 ## Future Improvements
@@ -1067,6 +1245,12 @@ A second job, `docker-build`, runs in parallel: builds the Docker image and conf
 - Build the comparison/matching module connecting a `SupplierQuotation` back to its original RFQ line — part number matching, UOM/quantity reconciliation, and the human-review triggers that follow from a mismatch.
 - Capture certificate availability confirmed through follow-up contact (phone, email) rather than only what a document states — the two scenarios explicitly deferred in `SupplierQuotation` v0.
 - Expand the quotation extraction eval set beyond 8 developer-authored documents to independently-sourced, genuinely messy real-world variety, including at least one scanned/OCR case.
+- Build the second pause: after approval, wait for the supplier's quotation, then run the Docling extraction and a comparison step — worth doing once the comparison module exists, so the second half is not a stub.
+- Run the pytest suite in CI (every Anthropic call is mocked, so it costs nothing), ideally on the image's Python version.
+- Return a clear `502` with the `trace_id` when the model provider fails, instead of a bare `500`.
+- Bake Docling's models into the image, and update the Kubernetes manifests (a `startupProbe`, a higher memory limit, a PersistentVolumeClaim and a `Recreate` strategy) once the endpoints stop changing.
+- Add authentication to the review API and record who decided and when; add review controls to the dashboard, and allow per-draft approval or editing.
+- Put a workflow tool (self-hosted n8n, or Power Automate in a Microsoft 365 setting) around the three review endpoints for triggers and notifications. Only that layer: the agent, the graph and the approval logic stay in code, where they are tested.
 - Add an MCP server exposing the existing tool set, now that a working tool-calling foundation exists to expose.
 - Add a non-root `USER` to the Docker image before treating it as anything beyond a portfolio demo.
 - Make custom application logging visible to `kubectl logs`/`docker logs` directly (e.g. also logging to stdout), instead of requiring `kubectl exec` to read it from inside the container.
@@ -1090,4 +1274,4 @@ This project sits at the intersection of both worlds: deep procurement domain kn
 
 ---
 
-*Built with Python, FastAPI, Pydantic, SQLAlchemy, SQLite, the Anthropic Claude API, sentence-transformers, Docling, Docker, Kubernetes (kind), win32com, and a lot of real procurement experience.*
+*Built with Python, FastAPI, Pydantic, SQLAlchemy, SQLite, the Anthropic Claude API, sentence-transformers, Docling, LangGraph, Docker, Kubernetes (kind), win32com, and a lot of real procurement experience.*
