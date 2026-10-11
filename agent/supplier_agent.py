@@ -152,6 +152,13 @@ def dispatch_tool(
     try:
         result = entry["function"](validated_input, trace_id=trace_id)
     except Exception as exc:  # noqa: BLE001 — deliberately broad, see docstring
+        # The model only ever sees str(exc). Without this line the type and
+        # traceback of a failing tool were logged NOWHERE, so a broken
+        # database tool was invisible to anyone not reading the result.
+        logger.exception(
+            "Tool raised an unexpected error | trace_id=%s tool=%s",
+            trace_id, tool_name,
+        )
         return (
             {"error": f"Tool '{tool_name}' raised an unexpected error: {exc}"},
             True,
